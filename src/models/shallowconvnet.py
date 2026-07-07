@@ -17,7 +17,7 @@ class ShallowConvNet(nn.Module):
         version: str = "2018",
     ) -> None:
         super().__init__()
-
+ 
         if version == "2017":
             bias_spatial = False
             pool = (1, 75)
