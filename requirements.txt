@@ -8,4 +8,4 @@ openpyxl>=3.1
 matplotlib>=3.7
 torch==2.5.1
 torchaudio==2.5.1
-torchinfo>=1.8
+torchinfo>=1.8 
