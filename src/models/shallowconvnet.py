@@ -62,3 +62,5 @@ class ShallowConvNet(nn.Module):
         x = x.flatten(start_dim=1)
         x = self.classifier(x)
         return x
+
+

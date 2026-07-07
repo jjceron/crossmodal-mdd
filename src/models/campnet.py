@@ -153,3 +153,5 @@ class CrossModalDL(nn.Module):
 
         e_out, a_out, attn = self.fusion(e, a)
         return self._classify(self.pool_eeg(e_out), self.pool_aud(a_out)).squeeze(-1), attn
+
+

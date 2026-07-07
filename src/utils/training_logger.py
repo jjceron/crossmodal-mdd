@@ -178,3 +178,4 @@ def log_summary(fold_metrics, n_folds=None, mode='regr', split_type='gkf'):
     logger = RegressionLogger() if mode == 'regr' else ClassificationLogger()
     logger.fold_metrics = fold_metrics
     logger.log_summary(n_folds, split_type)
+

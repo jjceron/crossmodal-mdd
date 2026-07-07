@@ -471,3 +471,5 @@ def _LEGACY_load_raw_subjects(n_ch=64, random_state=42):
             wins = wins[idx]
         subjects[sid] = {'windows': wins, 'label': 1 if sg[sid] == 'MDD' else 0}
     return subjects
+
+

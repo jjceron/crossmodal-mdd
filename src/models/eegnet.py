@@ -337,3 +337,4 @@ if __name__ == "__main__":
     print("norm:", model.norm)
     print("logits shapes:", [z.shape for z in logits])
     print("logits_time shapes:", [z.shape for z in logits_time])
+
