@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
-
+ 
 
 class GaussianNoise(nn.Module):
     def __init__(self, snr: float = 20.0) -> None:
