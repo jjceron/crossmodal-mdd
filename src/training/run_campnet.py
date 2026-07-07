@@ -7,7 +7,7 @@ Nested protocol (zero leakage):
     3. Freeze both backbones
     4. Train CAMP-Net fusion + head on multimodal train data
     5. Evaluate on test data
-
+ 
 Modes:
   eeg_only      — EEG backbone → pool → head
   audio_only    — Audio backbone → pool → head
