@@ -10,7 +10,7 @@ Usage:
 """
 import os, sys, json, argparse
 import numpy as np
-import matplotlib
+import matplotlib 
 matplotlib.use('Agg' if not os.environ.get('DISPLAY') and os.name != 'nt' else 'TkAgg')
 import matplotlib.pyplot as plt
 
