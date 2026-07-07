@@ -27,7 +27,7 @@ docs/tex/
 
 # OS artifacts
 .DS_Store
-Thumbs.db
+Thumbs.db 
 desktop.ini
 
 # IDE / editor
