@@ -17,7 +17,7 @@ class DeepConvNet(nn.Module):
         n_classes: int = 1,
         n_samples: int = 500,
         dropout: float = 0.5,
-    ) -> None:
+    ) -> None: 
         super().__init__()
 
         self.block1 = nn.Sequential(
