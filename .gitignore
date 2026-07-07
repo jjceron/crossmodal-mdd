@@ -1,0 +1,38 @@
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Raw & processed data (large datasets — not version-controlled)
+data/
+
+# Generated outputs (experiment results, figures)
+outputs/
+
+# Temporary files
+tmp/
+
+# Documentation: only *.md at root level; exclude tex/ subfolder
+docs/*
+!docs/*.md
+docs/tex/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE / editor
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
