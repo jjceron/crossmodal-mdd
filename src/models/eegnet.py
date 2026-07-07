@@ -17,7 +17,7 @@ class EEGNet(nn.Module):
                 logits: Tensor[B, L]
                 logits_time: Tensor[B, T', L]
 
-        if aggregate=False:
+        if aggregate=False: 
             output:
                 logits: Tensor[B, T', L]
                 logits_time: Tensor[B, T', L]
