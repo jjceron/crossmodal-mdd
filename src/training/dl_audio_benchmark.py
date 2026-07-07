@@ -23,7 +23,7 @@ import os, sys, warnings, json, argparse, copy
 import numpy as np
 import torch, torch.nn as nn
 from sklearn.model_selection import StratifiedGroupKFold
-from sklearn.metrics import confusion_matrix, roc_auc_score
+from sklearn.metrics import balanced_accuracy_score, confusion_matrix, roc_auc_score
 from torch.utils.data import Dataset, DataLoader
 
 sys.path.insert(0, '.')
@@ -304,6 +304,30 @@ def evaluate_window_level(model, loader):
     return np.concatenate(all_y), np.concatenate(all_pred)
 
 
+def find_best_threshold(model, val_loader):
+    """Optimize classification threshold on validation set to maximize bacc."""
+    model.eval()
+    subj_preds, subj_true = {}, {}
+    with torch.no_grad():
+        for X, y, names in val_loader:
+            probs = torch.sigmoid(model(X.to(device))).cpu().numpy()
+            for i, sname in enumerate(names):
+                subj_preds.setdefault(sname, []).append(probs[i])
+                subj_true[sname] = y[i].item()
+    subjects = sorted(subj_true.keys())
+    y_true = np.array([subj_true[s] for s in subjects])
+    y_prob = np.array([np.mean(subj_preds[s]) for s in subjects])
+    best_t, best_b = 0.5, 0.0
+    for t in np.linspace(0.05, 0.95, 91):
+        pred = (y_prob >= t).astype(int)
+        if len(np.unique(pred)) < 2:
+            continue
+        b = balanced_accuracy_score(y_true, pred)
+        if b > best_b:
+            best_b, best_t = b, t
+    return best_t
+
+
 def _save_checkpoint(model_state, opt_state, model_key, fold_num, args):
     out_dir = os.path.join('outputs/results/classical_dl/trained_audio',
                            f'{model_key}_64mel')
@@ -326,10 +350,16 @@ def _save_partial(model_key, display_name, args, n_subjects, n_mdd, n_hc,
     baccs = [r['test_metrics']['bacc'] for r in fold_results_so_far]
     accs = [r['test_metrics']['acc'] for r in fold_results_so_far]
     f1s = [r['test_metrics']['f1'] for r in fold_results_so_far]
+    opt_baccs = [r['test_metrics_opt']['bacc'] for r in fold_results_so_far]
+    opt_accs = [r['test_metrics_opt']['acc'] for r in fold_results_so_far]
+    opt_f1s = [r['test_metrics_opt']['f1'] for r in fold_results_so_far]
     summary = {
         'bacc_mean': float(np.mean(baccs)), 'bacc_std': float(np.std(baccs)),
         'acc_mean': float(np.mean(accs)), 'acc_std': float(np.std(accs)),
         'f1_mean': float(np.mean(f1s)), 'f1_std': float(np.std(f1s)),
+        'bacc_opt_mean': float(np.mean(opt_baccs)), 'bacc_opt_std': float(np.std(opt_baccs)),
+        'acc_opt_mean': float(np.mean(opt_accs)), 'acc_opt_std': float(np.std(opt_accs)),
+        'f1_opt_mean': float(np.mean(opt_f1s)), 'f1_opt_std': float(np.std(opt_f1s)),
     }
     results_clean = [{k: v for k, v in r.items() if k != 'history'} for r in fold_results_so_far]
     out_results = {
@@ -364,6 +394,7 @@ def main():
 
     display_name, model_cls = MODEL_REGISTRY[args.model]
     logger = ClassificationLogger()
+    tau = '\u03c4'
     print(f'Device: {device}')
     print(f'MODMA Audio DL BENCHMARK — {display_name} (64 mel)')
 
@@ -393,14 +424,21 @@ def main():
             roc_auc = float(roc_auc_score(y_true_s, y_prob_s))
             roc_data = {'y_true': y_true_s.tolist(), 'y_prob': y_prob_s.tolist()}
             fm = logger.log_fold_test(y_true_s, y_pred_s)
+            opt_thresh = find_best_threshold(model, val_loader)
+            _, y_pred_s_opt, _ = evaluate_subject_level(model, te_loader, threshold=opt_thresh)
+            fm_opt = ClassificationLogger().metrics(y_true_s, y_pred_s_opt)
+            print(f"  >>> test ({tau}={opt_thresh:.2f})*: acc={fm_opt['acc']:.3f} bacc={fm_opt['bacc']:.3f} f1={fm_opt['f1']:.3f} sens={fm_opt['sens']:.3f} spec={fm_opt['spec']:.3f}")
             fold_results.append({'fold': fi + 1, 'best_val_bacc': float(best_vb),
                                   'n_epochs': len(history['train_loss']),
-                                  'test_metrics': fm, 'history': history,
+                                  'opt_threshold': float(opt_thresh),
+                                  'test_metrics': fm,
+                                  'test_metrics_opt': fm_opt,
+                                  'history': history,
                                   'test_cm_subject': cm_subject,
                                   'test_cm_window': cm_window,
                                   'test_roc': roc_data, 'test_roc_auc': roc_auc})
             all_histories.append({'fold': fi + 1, 'history': history})
-            print(f'  Fold {fi + 1}: bacc={fm["bacc"]:.3f}')
+            print(f'  Fold {fi + 1}: bacc={fm["bacc"]:.3f}  bacc_opt={fm_opt["bacc"]:.3f}  ({tau}*={opt_thresh:.2f})')
             _save_partial(args.model, display_name, args,
                           n_subjects, n_mdd, n_hc, fold_results, all_histories)
         except Exception as e:
@@ -417,12 +455,30 @@ def main():
         baccs = [r['test_metrics']['bacc'] for r in fold_results]
         accs = [r['test_metrics']['acc'] for r in fold_results]
         f1s = [r['test_metrics']['f1'] for r in fold_results]
+        opt_baccs = [r['test_metrics_opt']['bacc'] for r in fold_results]
+        opt_accs = [r['test_metrics_opt']['acc'] for r in fold_results]
+        opt_f1s = [r['test_metrics_opt']['f1'] for r in fold_results]
         summary = {
             'bacc_mean': float(np.mean(baccs)), 'bacc_std': float(np.std(baccs)),
             'acc_mean': float(np.mean(accs)), 'acc_std': float(np.std(accs)),
             'f1_mean': float(np.mean(f1s)), 'f1_std': float(np.std(f1s)),
+            'bacc_opt_mean': float(np.mean(opt_baccs)), 'bacc_opt_std': float(np.std(opt_baccs)),
+            'acc_opt_mean': float(np.mean(opt_accs)), 'acc_opt_std': float(np.std(opt_accs)),
+            'f1_opt_mean': float(np.mean(opt_f1s)), 'f1_opt_std': float(np.std(opt_f1s)),
         }
-        print(f'\n{display_name} (64 mel): bacc={summary["bacc_mean"]:.3f} +/- {summary["bacc_std"]:.3f}')
+        print(f'\n{display_name} (64 mel): bacc={summary["bacc_mean"]:.3f} +/- {summary["bacc_std"]:.3f}  |  bacc_opt={summary["bacc_opt_mean"]:.3f} +/- {summary["bacc_opt_std"]:.3f}')
+        print(f"\n{'=' * 60}")
+        print(f"  GKF RESULT ({args.k_folds} folds) — optimal threshold (per-fold val)*")
+        print(f"  {'':>7s} | {'mean':>8s} {'+-':>2s} {'std':>8s}")
+        print(f"  {'':->7s}-+-{'-' * 20}")
+        for name, arr in [('bacc_opt', opt_baccs), ('acc_opt', opt_accs), ('f1_opt', opt_f1s)]:
+            print(f"  {name:>7s} | {float(np.mean(arr)):>8.3f} {'+-':>2s} {float(np.std(arr)):>8.3f}")
+        print(f"\n  * thresholds optimized on validation set to maximize bacc")
+        print(f"  {'Fold':>7s} | {'bacc_opt':>8s} | {tau + '*':>6s}")
+        print(f"  {'':->7s}-+-{'-' * 18}")
+        for r in fold_results:
+            print(f"  {r['fold']:>7d} | {r['test_metrics_opt']['bacc']:>8.3f} | {r['opt_threshold']:>6.2f}")
+        print(f"{'=' * 60}")
 
         results_clean = [{k: v for k, v in r.items() if k != 'history'} for r in fold_results]
         out_results = {
