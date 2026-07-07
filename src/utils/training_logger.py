@@ -10,7 +10,7 @@ from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score, r
 
 def _check_binary(t, p):
     return len(np.unique(t)) >= 2 and len(np.unique(p)) >= 2
-
+ 
 
 # ── Classification Logger ──────────────────────────────────────────────
 
