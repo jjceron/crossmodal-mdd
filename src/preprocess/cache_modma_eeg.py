@@ -11,7 +11,7 @@ Preprocessing pipeline:
 Run once:
   py src/preprocess/cache_modma_eeg.py --channels 64
   py src/preprocess/cache_modma_eeg.py --channels 19
-
+ 
 Output:
   data/processed/eeg_preprocessed_64ch.npz
   data/processed/eeg_preprocessed_19ch.npz
