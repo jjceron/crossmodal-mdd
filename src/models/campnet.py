@@ -14,7 +14,7 @@ import torch, torch.nn as nn, math
 from torch import Tensor
 
 
-class RMSNorm(nn.Module):
+class RMSNorm(nn.Module): 
     def __init__(self, dim, eps=1e-6):
         super().__init__()
         self.scale = nn.Parameter(torch.ones(dim))
