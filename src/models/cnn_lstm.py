@@ -14,7 +14,7 @@ class CNNLSTM(nn.Module):
         temporal_filters: int = 25,
         temporal_kernel: int = 25,
         depth_multiplier: int = 1,
-        pool_size: int = 40,
+        pool_size: int = 40, 
         pool_stride: int = 20,
         dropout: float = 0.5,
         lstm_units_1: int = 10,
