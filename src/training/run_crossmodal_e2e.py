@@ -137,8 +137,7 @@ class EEGBackbone(nn.Module):
         self.feat_dim = 256
 
     def forward(self, x):
-        if x.dim() == 4:
-            x = x.unsqueeze(1)
+        # x: [N, 1, 64, 500] (already 4D with channel dim)
         x = self.net.block1(x)
         x = self.net.block2(x)
         x = self.net.block3(x)
@@ -177,8 +176,7 @@ class AudioBackbone(nn.Module):
             self.feat_dim = x.flatten(start_dim=1).shape[1]
 
     def forward(self, x):
-        if x.dim() == 4:
-            x = x.unsqueeze(1)
+        # x: [N, 1, 64, 200] (already 4D with channel dim)
         x = self.net.temporal_conv(x)
         x = self.net.spatial_conv(x)
         x = self.net.bn(x)
