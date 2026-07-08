@@ -1,27 +1,40 @@
-"""Cache preprocessed EEG windows for fast DL training — v4.
+"""Cache preprocessed EEG windows for fast DL training — v5.
 
 Preprocessing pipeline:
   1. Bandpass filter 0.5–60 Hz
   2. Notch filter 50 Hz (power line)
-  3. Channel selection (64-first or 19-clinical via 10-20 mapping)
+  3. Channel selection:
+       - 64: first 64 channels (0–63)
+       - 19: clinical 10-20 subset via nearest-neighbor on EGI layout
+       - 128: all 128 channels
+       - ftsm4|8|16|32|64: top-K channels from FTSM ranking
   4. Average reference (computed on selected channels only)
   5. 2s windows, 50% overlap
-  6. All windows retained (no random subsampling)
+  6. All windows retained
 
-Run once:
+Run once (unimodal benchmarks):
   py src/preprocess/cache_modma_eeg.py --channels 64
   py src/preprocess/cache_modma_eeg.py --channels 19
- 
+  py src/preprocess/cache_modma_eeg.py --channels 128
+
+Run after FTSM ranking computed:
+  py src/preprocess/cache_modma_eeg.py --channels ftsm4
+  py src/preprocess/cache_modma_eeg.py --channels ftsm8
+  py src/preprocess/cache_modma_eeg.py --channels ftsm16
+  py src/preprocess/cache_modma_eeg.py --channels ftsm32
+  py src/preprocess/cache_modma_eeg.py --channels ftsm64
+
 Output:
-  data/processed/eeg_preprocessed_64ch.npz
-  data/processed/eeg_preprocessed_19ch.npz
+  data/processed/eeg_preprocessed_{n_ch}ch.npz       (64, 19, 128)
+  data/processed/eeg_preprocessed_ftsm{k}.npz         (FTSM subsets)
 """
-import sys, os, glob, argparse, numpy as np, pandas as pd, mne, warnings
+import sys, os, glob, json, argparse, numpy as np, pandas as pd, mne, warnings
 warnings.filterwarnings('ignore')
 sys.path.insert(0, '.')
 
 EEG_DIR = 'data/raw/modma/MODMA_EEG_BIDS_format/EEG_LZU_2015_2_resting state'
 PARTICIPANTS_PATH = f'{EEG_DIR}/participants.tsv'
+FTSM_RANKING_PATH = 'data/processed/ftsm_ranking.json'
 SFREQ = 250
 WINDOW_SEC = 2.0
 OVERLAP = 0.5
@@ -83,16 +96,59 @@ def _compute_10_20_indices(electrodes_path):
     return indices
 
 
+# ── Argument parsing ------------------------------------------------------
+
+_VALID_CHANNEL_ARGS = ['64', '19', '128'] + [f'ftsm{k}' for k in (4, 8, 16, 32, 64)]
+
+
+def _parse_channels(raw):
+    """Parse --channels argument into (n_ch, selection_mode, ftsm_indices).
+
+    Returns:
+        n_ch: number of channels to keep
+        out_suffix: string for output filename (e.g. '64ch', 'ftsm4')
+        pick_indices: list of 0-based channel indices to select, or None for first-n
+    """
+    v = raw.lower()
+
+    if v == '128':
+        return 128, '128ch', None
+
+    if v == '64':
+        return 64, '64ch', None
+
+    if v == '19':
+        return 19, '19ch', None  # resolved later via electrodes.tsv
+
+    if v.startswith('ftsm'):
+        k = int(v.replace('ftsm', ''))
+        if not os.path.exists(FTSM_RANKING_PATH):
+            print(f'ERROR: FTSM ranking not found at {FTSM_RANKING_PATH}')
+            print('  Run py src/preprocess/ftsm_chselector.py first.')
+            sys.exit(1)
+        with open(FTSM_RANKING_PATH) as f:
+            ranking = json.load(f)
+        ch_1based = ranking['nested_subsets'].get(str(k))
+        if ch_1based is None:
+            print(f'ERROR: no subset for k={k} in FTSM ranking')
+            sys.exit(1)
+        pick = [c - 1 for c in ch_1based]  # 1-based → 0-based
+        return k, f'ftsm{k}', pick
+
+    raise ValueError(f'Invalid --channels argument: {raw}. '
+                     f'Choose from {_VALID_CHANNEL_ARGS}')
+
+
 # ── Main ────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description='Cache preprocessed MODMA EEG windows')
-    parser.add_argument('--channels', type=int, default=64, choices=[64, 19],
-                        help='64 = first 64 channels, 19 = 10-20 clinical subset')
+    parser.add_argument('--channels', type=str, default='64',
+                        help=f'Channel selection. Options: {_VALID_CHANNEL_ARGS}')
     args = parser.parse_args()
 
-    n_ch = args.channels
-    out_path = f'data/processed/eeg_preprocessed_{n_ch}ch.npz'
+    n_ch, out_suffix, pick_indices = _parse_channels(args.channels)
+    out_path = f'data/processed/eeg_preprocessed_{out_suffix}.npz'
 
     p = pd.read_csv(PARTICIPANTS_PATH, sep='\t', header=None, skiprows=1,
                      on_bad_lines='skip', engine='python')
@@ -102,16 +158,15 @@ def main():
 
     sub_dirs = sorted(glob.glob(os.path.join(EEG_DIR, 'sub-*')))
 
-    if n_ch == 19 and sub_dirs:
+    # Resolve 10-20 clinical indices if needed
+    if out_suffix == '19ch' and sub_dirs:
         electrodes_tsv = glob.glob(os.path.join(sub_dirs[0], 'eeg', '*_electrodes.tsv'))
         if electrodes_tsv:
             print('Computing 10-20 → EGI channel mapping:')
-            clinical_indices = _compute_10_20_indices(electrodes_tsv[0])
+            pick_indices = _compute_10_20_indices(electrodes_tsv[0])
         else:
             print('ERROR: electrodes.tsv not found. Cannot compute 19-channel mapping.')
             return
-    else:
-        clinical_indices = None
 
     all_wins, all_ids, all_labels = [], [], []
 
@@ -131,14 +186,14 @@ def main():
         raw.filter(0.5, 60, verbose=False)
         raw.notch_filter(50, verbose=False)
 
-        if clinical_indices is not None:
-            if max(clinical_indices) >= len(raw.ch_names):
+        if pick_indices is not None:
+            if max(pick_indices) >= len(raw.ch_names):
                 continue
-            raw.pick([raw.ch_names[i] for i in clinical_indices])
+            raw.pick([raw.ch_names[i] for i in pick_indices])
 
         raw.set_eeg_reference('average', verbose=False)
 
-        if clinical_indices is None:
+        if pick_indices is None:
             if len(raw.ch_names) < n_ch:
                 continue
             data = raw.get_data()[:n_ch]
@@ -161,18 +216,31 @@ def main():
         print(f'  {sid}: {win.shape[0]} windows, label={all_labels[-1]}')
 
     os.makedirs('data/processed', exist_ok=True)
+
+    # Save as padded 4D array (avoids pickle MemoryError with large 128ch data)
+    max_w = max(w.shape[0] for w in all_wins)
+    n_subj = len(all_wins)
+    n_chan = all_wins[0].shape[1]
+    n_time = all_wins[0].shape[2]
+    padded = np.zeros((n_subj, max_w, n_chan, n_time), dtype=np.float32)
+    mask = np.zeros((n_subj, max_w), dtype=bool)
+    for i, win in enumerate(all_wins):
+        nw = win.shape[0]
+        padded[i, :nw] = win
+        mask[i, :nw] = True
+
     np.savez(out_path,
-             windows=np.array(all_wins, dtype=object),
+             windows=padded, window_mask=mask,
              subject_ids=np.array(all_ids),
-             labels=np.array(all_labels, dtype=np.int32),
-             allow_pickle=True)
+             labels=np.array(all_labels, dtype=np.int32))
     n_mdd = sum(all_labels)
     print(f'\nSaved: {out_path}')
     print(f'  Subjects: {len(all_ids)} ({n_mdd} MDD, {len(all_ids) - n_mdd} HC)')
     print(f'  Total windows: {sum(w.shape[0] for w in all_wins)}')
     print(f'  Avg windows/subject: {np.mean([w.shape[0] for w in all_wins]):.0f}')
     print(f'  Min/Max windows: {min(w.shape[0] for w in all_wins)}/{max(w.shape[0] for w in all_wins)}')
-    print(f'  Shape per window: {all_wins[0].shape[1:]}')
+    print(f'  Shape per window: ({n_chan}, {n_time})')
+    print(f'  Saved as contig array ({out_suffix}) — no pickle overhead')
 
 
 if __name__ == '__main__':
