@@ -22,22 +22,32 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
+      - name: Setup CML
+        uses: iterative/setup-cml@v2
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Compile Python files
+        run: |
+          python -m compileall src
+
       - name: Run Ruff
         run: |
           ruff check .
 
-      - name: Run tests
+      - name: Generate ML report
         run: |
-          pytest
+          python scripts/generate_report.py
 
-      - name: Compile Python files
+      - name: Publish CML report
+        if: github.event_name == 'pull_request'
+        env:
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python -m compileall src
+          cml comment create report.md
 
       - name: CI completed
         run: echo "✅ CI passed."
