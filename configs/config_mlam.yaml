@@ -31,4 +31,4 @@ linear_probe_min_bacc: 0.665    # baseline 0.685 - 2%
 retrieval_min_top1: 0.50        # minimum retrieval Top-1 to pass gate
 
 # Reproducibility
-seed: 42
+seed: 42 
