@@ -102,7 +102,8 @@ class CrossModalAttention(nn.Module):
     def __init__(self, eeg_dim, aud_dim, hidden=64, n_heads=2,
                  bottleneck_dim=None, n_self_attn_layers=0,
                  self_attn_heads=4, self_attn_dropout=0.1,
-                 fusion='cross_attn', pooling='mean', dropout=0.5):
+                 fusion='cross_attn', pooling='mean', dropout=0.5,
+                 param_control=False):
         super().__init__()
         self.fusion = fusion
         self.pooling = pooling
@@ -142,6 +143,14 @@ class CrossModalAttention(nn.Module):
         if pooling == 'cls':
             self.cls_token = nn.Parameter(torch.randn(1, 1, hidden))
             self.pool = AttentionPool(hidden)
+
+        # Param-control MLP (matches param count of one self-attn block)
+        if param_control:
+            self.ctrl_mlp = nn.Sequential(
+                nn.Linear(hidden, hidden * 4),
+                nn.GELU(),
+                nn.Linear(hidden * 4, hidden),
+            )
 
         # Classifier head
         self.head = nn.Sequential(
