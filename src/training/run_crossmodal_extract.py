@@ -36,13 +36,19 @@ np.random.seed(RANDOM_STATE)
 
 
 def _load_cache(npz_path):
-    c = np.load(npz_path, allow_pickle=True)
+    c = np.load(npz_path)
     wins = c['windows']
     labels = c['labels']
     ids = [str(s) for s in c['subject_ids']]
+    has_mask = 'window_mask' in c
     subjects = {}
     for i, sid in enumerate(ids):
-        subjects[sid] = {'windows': wins[i], 'label': int(labels[i])}
+        if has_mask:
+            mask = c['window_mask'][i]
+            w = wins[i][mask]
+        else:
+            w = wins[i]
+        subjects[sid] = {'windows': w, 'label': int(labels[i])}
     return subjects, ids, np.array(labels)
 
 

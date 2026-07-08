@@ -19,7 +19,7 @@ sys.path.insert(0, '.')
 
 from src.models.deepconvnet import DeepConvNet
 from src.models.shallowconvnet import ShallowConvNet
-from src.models.crossmodal_attention import CrossModalAttention, SelfAttentionBlock
+from src.models.crossmodal_attn import CrossModalAttention, SelfAttentionBlock
 from src.utils.training_logger import ClassificationLogger
 
 EEG_CACHE = 'data/processed/eeg_preprocessed_64ch.npz'
@@ -41,13 +41,19 @@ np.random.seed(RANDOM_STATE)
 # ── Data loading ──────────────────────────────────────────────────────────
 
 def _load_cache(npz_path):
-    c = np.load(npz_path, allow_pickle=True)
+    c = np.load(npz_path)
     wins = c['windows']
     labels = c['labels']
     ids = [str(s) for s in c['subject_ids']]
+    has_mask = 'window_mask' in c
     subjects = {}
     for i, sid in enumerate(ids):
-        subjects[sid] = {'windows': wins[i], 'label': int(labels[i])}
+        if has_mask:
+            mask = c['window_mask'][i]
+            w = wins[i][mask]
+        else:
+            w = wins[i]
+        subjects[sid] = {'windows': w, 'label': int(labels[i])}
     return subjects, ids, np.array(labels)
 
 
