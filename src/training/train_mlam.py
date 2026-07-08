@@ -336,6 +336,7 @@ def main():
             # Validation: retrieval Top-1
             model.eval()
             all_ze, all_za, vids_e, vids_a = [], [], [], []
+            pair_idx = 0
             with torch.no_grad():
                 for eid, aid, _ in vl_pairs:
                     we = eeg_subjs[eid]['windows']
@@ -351,8 +352,9 @@ def main():
                     za = model.encode_aud(wa, device).cpu()
                     all_ze.append(ze)
                     all_za.append(za)
-                    vids_e.extend([eid] * K)
-                    vids_a.extend([aid] * K)
+                    vids_e.extend([pair_idx] * K)
+                    vids_a.extend([pair_idx] * K)
+                    pair_idx += 1
 
             all_ze = torch.cat(all_ze, dim=0)
             all_za = torch.cat(all_za, dim=0)
