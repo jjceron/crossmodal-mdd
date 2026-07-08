@@ -14,6 +14,9 @@ env/
 # Raw & processed data (large datasets — not version-controlled)
 data/
 
+# Cache
+cache/
+
 # Generated outputs (experiment results, figures)
 outputs/
 
