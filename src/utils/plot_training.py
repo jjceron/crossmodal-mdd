@@ -2,9 +2,10 @@
 Plot training curves, confusion matrices, and ROC from saved JSON results.
 
 Usage:
-  python src/utils/plot_training.py --type classical_dl --model deepconvnet --channels 64 --fold 1 --metric bacc
-  python src/utils/plot_training.py --type classical_dl --model deepconvnet --channels 64 --fold 3 --cm
-  python src/utils/plot_training.py --type classical_dl --model deepconvnet --channels 64 --all --metric roc
+  python src/utils/plot_training.py --type classical_dl --modality eeg --model deepconvnet --fold 1 --metric bacc
+  python src/utils/plot_training.py --type classical_dl --modality audio --model deepconvnet --all --metric acc
+  python src/utils/plot_training.py --type classical_dl --modality eeg --model deepconvnet --fold 3 --cm
+  python src/utils/plot_training.py --type classical_dl --modality audio --model deepconvnet --all --metric roc
   python src/utils/plot_training.py --type classical_ml --model xgboost --all --metric bacc
   python src/utils/plot_training.py --type ocampnet --model cross_attn --all --cm --save_png
 """
@@ -21,20 +22,20 @@ METRIC_KEYS = {'bacc': 'val_bacc', 'acc': 'val_acc', 'f1': 'val_f1',
                'sens': 'val_sens', 'spec': 'val_spec'}
 
 TYPE_MAP = {
-    'classical_dl':   'classical_dl/eeg',
-    'classical_ml':   'classical_ml',
-    'ocampnet':       'ocampnet',
+    'classical_dl': 'classical_dl',
+    'classical_ml': 'classical_ml',
+    'ocampnet':     'ocampnet',
 }
 
 
-def _load_curves(benchmark, model, channels):
-    path = os.path.join(RESULTS_ROOT, benchmark, f'{model}_{channels}ch_curves.json')
+def _load_curves(benchmark, model, channels, suffix='ch'):
+    path = os.path.join(RESULTS_ROOT, benchmark, f'{model}_{channels}{suffix}_curves.json')
     with open(path) as f:
         return json.load(f)
 
 
-def _load_results(benchmark, model, channels):
-    path = os.path.join(RESULTS_ROOT, benchmark, f'{model}_{channels}ch.json')
+def _load_results(benchmark, model, channels, suffix='ch'):
+    path = os.path.join(RESULTS_ROOT, benchmark, f'{model}_{channels}{suffix}.json')
     with open(path) as f:
         return json.load(f)
 
@@ -155,8 +156,10 @@ def main():
                         help='Experiment type: classical_dl, classical_ml, ocampnet')
     parser.add_argument('--model', type=str, required=True,
                         help='Model key (e.g. deepconvnet)')
-    parser.add_argument('--channels', type=int, default=64, choices=[64, 19],
-                        help='Channel count')
+    parser.add_argument('--channels', type=int, default=64,
+                        help='Feature count (channels for EEG, mels for audio)')
+    parser.add_argument('--modality', type=str, default='eeg', choices=['eeg', 'audio'],
+                        help='Data modality (eeg=64ch, audio=64mel)')
     parser.add_argument('--fold', type=int, default=None,
                         help='Fold number (1-based)')
     parser.add_argument('--all', action='store_true',
@@ -172,12 +175,13 @@ def main():
                         help='Save PNG instead of displaying')
     args = parser.parse_args()
 
-    benchmark = TYPE_MAP[args.type]
+    benchmark = f'{TYPE_MAP[args.type]}/{args.modality}'
+    suffix = 'mel' if args.modality == 'audio' else 'ch'
 
     curves_path = os.path.join(RESULTS_ROOT, benchmark,
-                               f'{args.model}_{args.channels}ch_curves.json')
+                               f'{args.model}_{args.channels}{suffix}_curves.json')
     results_path = os.path.join(RESULTS_ROOT, benchmark,
-                                f'{args.model}_{args.channels}ch.json')
+                                 f'{args.model}_{args.channels}{suffix}.json')
 
     curves = None
     if os.path.exists(curves_path):
@@ -191,7 +195,7 @@ def main():
         sys.exit(1)
 
     model_name = (results or curves).get('model', args.model)
-    out_dir = os.path.join(FIGURES_ROOT, benchmark, f'{args.model}_{args.channels}ch')
+    out_dir = os.path.join(FIGURES_ROOT, benchmark, f'{args.model}_{args.channels}{suffix}')
     os.makedirs(out_dir, exist_ok=True)
 
     # ── Confusion matrix ───────────────────────────────────────────────
