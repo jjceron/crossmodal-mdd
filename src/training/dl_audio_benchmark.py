@@ -147,28 +147,39 @@ def load_cached_audio():
 # ── Partitioning ────────────────────────────────────────────────────────
 
 class WindowDataset(Dataset):
-    """Flatten windows per subject, normalize each window independently."""
+    """Lazy-loading windows: builds index only, normalizes on __getitem__."""
 
-    def __init__(self, windows_list, labels_list, subj_names, indices):
-        self.X, self.y, self.subj = [], [], []
+    def __init__(self, windows_list, labels_list, subj_names, indices, max_windows=None):
+        self._windows = windows_list
+        self._subj_names = subj_names
+        self._labels = labels_list
+        self._index = []
         for idx in indices:
-            for w in windows_list[idx]:
-                self.X.append((w - w.mean()) / (w.std() + 1e-8))
-                self.y.append(labels_list[idx])
-                self.subj.append(subj_names[idx])
-        self.X = torch.from_numpy(np.array(self.X)).float()
-        self.y = torch.tensor(self.y, dtype=torch.float)
+            wins = windows_list[idx]
+            n = wins.shape[0]
+            if max_windows is not None and n > max_windows:
+                rng = np.random.RandomState(RANDOM_STATE + idx)
+                keep = rng.choice(n, max_windows, replace=False)
+                for k in keep:
+                    self._index.append((idx, int(k), float(labels_list[idx])))
+            else:
+                for w in range(n):
+                    self._index.append((idx, w, float(labels_list[idx])))
 
     def __len__(self):
-        return len(self.y)
+        return len(self._index)
 
-    def __getitem__(self, idx):
-        return self.X[idx], self.y[idx], self.subj[idx]
+    def __getitem__(self, i):
+        idx, w_idx, label = self._index[i]
+        w = self._windows[idx][w_idx].copy()
+        w = (w - w.mean()) / (w.std() + 1e-8)
+        return torch.from_numpy(w).float(), torch.tensor(label, dtype=torch.float), self._subj_names[idx]
 
 
 def create_dataloaders(subject_data, labels, subject_names,
                        k_folds=5, batch_size=32, seed=RANDOM_STATE,
-                       inner_folds=5, num_workers=0, pin_memory=True):
+                       inner_folds=5, max_windows=None,
+                       num_workers=0, pin_memory=True):
     """Return list of (train_loader, val_loader, test_loader) tuples."""
     outer = StratifiedGroupKFold(n_splits=k_folds, shuffle=True, random_state=seed)
     folds = []
@@ -177,15 +188,48 @@ def create_dataloaders(subject_data, labels, subject_names,
         tr_i, vi = next(inner.split(np.zeros(len(tvi)),
                                      [labels[i] for i in tvi],
                                      groups=[subject_names[i] for i in tvi]))
-        train_ds = WindowDataset(subject_data, labels, subject_names, [tvi[i] for i in tr_i])
-        val_ds = WindowDataset(subject_data, labels, subject_names, [tvi[i] for i in vi])
-        test_ds = WindowDataset(subject_data, labels, subject_names, tei)
+        train_ds = WindowDataset(subject_data, labels, subject_names, [tvi[i] for i in tr_i], max_windows=max_windows)
+        val_ds = WindowDataset(subject_data, labels, subject_names, [tvi[i] for i in vi], max_windows=max_windows)
+        test_ds = WindowDataset(subject_data, labels, subject_names, tei, max_windows=max_windows)
         folds.append((
             DataLoader(train_ds, batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory),
             DataLoader(val_ds, batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory),
             DataLoader(test_ds, batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory),
         ))
     return folds
+
+
+def build_train_val_loaders(subject_data, labels, subject_names,
+                            train_indices, val_indices,
+                            batch_size=32, max_windows=None,
+                            num_workers=0, pin_memory=True):
+    """Build DataLoaders for given subject indices. Used by train_audio_backbone()."""
+    train_ds = WindowDataset(subject_data, labels, subject_names,
+                             [train_indices[i] for i in range(len(train_indices))],
+                             max_windows=max_windows)
+    val_ds = WindowDataset(subject_data, labels, subject_names,
+                           [val_indices[i] for i in range(len(val_indices))],
+                           max_windows=max_windows)
+    return (
+        DataLoader(train_ds, batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory),
+        DataLoader(val_ds, batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory),
+    )
+
+
+def train_audio_backbone(train_idx, val_idx, subject_data, labels, subject_ids,
+                         args, model_key='shallowconvnet'):
+    """Train audio backbone on given subject indices. Returns trained model."""
+    display_name, model_cls = MODEL_REGISTRY[model_key]
+    model = model_cls(n_channels=N_MELS, n_samples=N_SAMPLES).to(device)
+    tr_loader, vl_loader = build_train_val_loaders(
+        subject_data, labels, subject_ids,
+        train_idx, val_idx,
+        batch_size=args.bs if hasattr(args, 'bs') else 32,
+        max_windows=getattr(args, 'max_windows', None))
+    logger = ClassificationLogger()
+    best_st, _, best_vb, _ = train_window_fold(model, tr_loader, vl_loader, args, logger)
+    model.load_state_dict(best_st)
+    return model, best_vb
 
 
 # ── Training helpers ────────────────────────────────────────────────────
@@ -388,6 +432,8 @@ def main():
     parser.add_argument('--patience', type=int, default=15)
     parser.add_argument('--k-folds', type=int, default=5)
     parser.add_argument('--inner-folds', type=int, default=3)
+    parser.add_argument('--max-windows', type=int, default=None,
+                        help='Cap windows per subject (None = use all)')
     parser.add_argument('--save-model', action='store_true',
                         help='Save best model (.pt) and config per fold')
     args = parser.parse_args()
@@ -405,7 +451,8 @@ def main():
 
     folds = create_dataloaders(data, labels.tolist(), cods,
                                k_folds=args.k_folds, batch_size=args.batch_size,
-                               inner_folds=args.inner_folds)
+                               inner_folds=args.inner_folds,
+                               max_windows=args.max_windows)
     fold_results, all_histories = [], []
     for fi, (tr_loader, val_loader, te_loader) in enumerate(folds):
         try:
