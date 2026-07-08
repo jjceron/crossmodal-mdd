@@ -130,11 +130,11 @@ def e2e_collate(batch):
 # ── Backbone wrappers (return features before classifier) ─────────────────
 
 class EEGBackbone(nn.Module):
-    """DeepConvNet conv blocks only → [B, 256] features."""
+    """DeepConvNet conv blocks only → [B, D] features."""
     def __init__(self):
         super().__init__()
         self.net = DeepConvNet(N_EEG_CH, 1, 500, 0.5)
-        self.feat_dim = 256
+        self.feat_dim = self.net.fc_features
 
     def forward(self, x):
         # x: [N, 1, 64, 500] (already 4D with channel dim)
