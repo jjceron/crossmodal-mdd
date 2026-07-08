@@ -13,9 +13,13 @@ Usage:
   py src/utils/eval_embeddings.py --modality eeg --model eegnet --channels 64
   py src/utils/eval_embeddings.py --modality audio --model cnnlstm
 """
-import sys, os, json, argparse, warnings
+import sys
+import os
+import argparse
+import warnings
 import numpy as np
-import torch, torch.nn as nn
+import torch
+import torch.nn as nn
 
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.svm import LinearSVC

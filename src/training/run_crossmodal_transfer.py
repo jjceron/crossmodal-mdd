@@ -12,9 +12,15 @@ For each outer fold (5-fold):
 Usage:
   py src/training/run_crossmodal_transfer.py --fusion cross_attn --n-self-attn-layers 1
 """
-import sys, os, json, argparse, copy, warnings
+import sys
+import os
+import json
+import argparse
+import copy
+import warnings
 import numpy as np
-import torch, torch.nn as nn
+import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import confusion_matrix, roc_auc_score, balanced_accuracy_score
@@ -28,7 +34,7 @@ from src.training.dl_eeg_benchmark import load_cached_eeg, train_eeg_backbone
 from src.training.dl_audio_benchmark import load_cached_audio, train_audio_backbone
 from src.training.run_crossmodal_e2e import (
     E2EModel, SubjectWindowDataset, e2e_collate, evaluate,
-    _load_multimodal_pairs, N_EEG_CH, N_AUDIO_MELS, N_AUDIO_FRAMES, RANDOM_STATE,
+    _load_multimodal_pairs, N_EEG_CH, RANDOM_STATE,
 )
 from src.utils.training_logger import ClassificationLogger
 
@@ -99,7 +105,7 @@ def main():
     # 1. Load all unimodal data
     print('\n--- Loading EEG data ---')
     eeg_data, eeg_labels, eeg_ids, n_samples = load_cached_eeg(64)
-    print(f'\n--- Loading Audio data ---')
+    print('\n--- Loading Audio data ---')
     aud_data, aud_labels, aud_ids = load_cached_audio()
     print()
 

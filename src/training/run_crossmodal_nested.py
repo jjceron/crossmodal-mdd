@@ -6,9 +6,15 @@ Usage:
   py src/training/run_crossmodal_nested.py --fusion cross_attn --n-self-attn-layers 1
   py src/training/run_crossmodal_nested.py --fusion concat --outer-folds 5
 """
-import sys, os, json, argparse, copy, warnings
+import sys
+import os
+import json
+import argparse
+import copy
+import warnings
 import numpy as np
-import torch, torch.nn as nn
+import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import confusion_matrix, roc_auc_score, balanced_accuracy_score
@@ -19,10 +25,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 sys.path.insert(0, '.')
 
 from src.training.run_crossmodal_e2e import (
-    EEGBackbone, AudioBackbone, E2EModel, WindowClassifier,
-    SubjectWindowDataset, e2e_collate, evaluate,
+    E2EModel, SubjectWindowDataset, e2e_collate, evaluate,
     _load_cache, _load_multimodal_pairs,
-    N_EEG_CH, N_AUDIO_MELS, N_AUDIO_FRAMES, RANDOM_STATE,
+    RANDOM_STATE,
 )
 from src.utils.training_logger import ClassificationLogger
 
@@ -275,7 +280,7 @@ def main():
 
         csv_path = os.path.join(os.path.dirname(OUTPUT_DIR), 'consolidated_results.csv')
         header = 'config_name,probe_type,fusion,n_self_attn,bottleneck_dim,' \
-                 f'max_windows,bacc_mean,bacc_std,auc_mean,auc_std\n'
+                 'max_windows,bacc_mean,bacc_std,auc_mean,auc_std\n'
         row = f'{cfg_name},nested_loocv,{args.fusion},{args.n_self_attn_layers},' \
               f'{args.bottleneck_dim},{args.max_windows},' \
               f'{summary["bacc_mean"]:.4f},{summary["bacc_std"]:.4f},' \

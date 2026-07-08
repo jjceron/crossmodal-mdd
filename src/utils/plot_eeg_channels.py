@@ -15,7 +15,10 @@ Usage:
   py src/utils/plot_eeg_channels.py --channels 19 --save-plot outputs/plots/19ch.png
   py src/utils/plot_eeg_channels.py --channels ftsm16 --save-plot outputs/plots/ftsm16.png
 """
-import sys, os, json, argparse
+import sys
+import os
+import json
+import argparse
 import numpy as np
 import matplotlib
 if any(a.startswith('--save') for a in sys.argv):

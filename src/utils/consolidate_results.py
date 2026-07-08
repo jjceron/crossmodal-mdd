@@ -6,7 +6,11 @@ Usage:
                                          [--backbone-cache cache/crossmodal_features]
                                          [--output outputs/results/crossmodal/consolidated_results.csv]
 """
-import sys, os, json, argparse, glob
+import sys
+import os
+import json
+import argparse
+import glob
 import numpy as np
 
 EEG_DIR = 'outputs/results/classical_dl/eeg'

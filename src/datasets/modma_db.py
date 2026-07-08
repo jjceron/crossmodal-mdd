@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 from collections import Counter
 from io import StringIO 
@@ -429,7 +428,7 @@ def main():
         duration_sec=args.duration_sec,
     )
 
-    print(f"\nMODMA Dataset loaded:")
+    print("\nMODMA Dataset loaded:")
     print(f"  Subjects: {len(dataset)}")
     print(f"  Channels: {len(dataset.channel_names)}")
     print(f"  Tensor shape: {dataset.samples[0]['eeg'].shape}")

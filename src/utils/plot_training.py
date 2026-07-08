@@ -9,7 +9,10 @@ Usage:
   python src/utils/plot_training.py --type classical_ml --model xgboost --all --metric bacc
   python src/utils/plot_training.py --type ocampnet --model cross_attn --all --cm --save_png
 """
-import os, sys, json, argparse
+import os
+import sys
+import json
+import argparse
 import numpy as np
 import matplotlib 
 matplotlib.use('Agg' if not os.environ.get('DISPLAY') and os.name != 'nt' else 'TkAgg')
@@ -25,6 +28,7 @@ TYPE_MAP = {
     'classical_dl': 'classical_dl',
     'classical_ml': 'classical_ml',
     'ocampnet':     'ocampnet',
+    'crossmodal_strict': 'crossmodal_strict',
 }
 
 
@@ -153,7 +157,7 @@ def main():
     parser = argparse.ArgumentParser(description='Plot training diagnostics')
     parser.add_argument('--type', type=str, required=True,
                         choices=list(TYPE_MAP.keys()),
-                        help='Experiment type: classical_dl, classical_ml, ocampnet')
+                        help='Experiment type: classical_dl, classical_ml, ocampnet, crossmodal_strict')
     parser.add_argument('--model', type=str, required=True,
                         help='Model key (e.g. deepconvnet)')
     parser.add_argument('--channels', type=int, default=64,
@@ -173,30 +177,47 @@ def main():
                         help='Show overall confusion matrix (aggregated across folds)')
     parser.add_argument('--save_png', action='store_true',
                         help='Save PNG instead of displaying')
+    parser.add_argument('--subtype', type=str, default=None,
+                        choices=['eeg', 'aud', 'fusion'],
+                        help='For crossmodal_strict: which history to plot (eeg, aud, fusion)')
     args = parser.parse_args()
 
-    benchmark = f'{TYPE_MAP[args.type]}/{args.modality}'
-    suffix = 'mel' if args.modality == 'audio' else 'ch'
+    is_strict = args.type == 'crossmodal_strict'
 
-    curves_path = os.path.join(RESULTS_ROOT, benchmark,
-                               f'{args.model}_{args.channels}{suffix}_curves.json')
-    results_path = os.path.join(RESULTS_ROOT, benchmark,
-                                 f'{args.model}_{args.channels}{suffix}.json')
-
-    curves = None
-    if os.path.exists(curves_path):
-        curves = json.load(open(curves_path))
-    results = None
-    if os.path.exists(results_path):
-        results = json.load(open(results_path))
-
-    if curves is None and results is None:
-        print(f'ERROR: no files found for {args.model}_{args.channels}ch')
-        sys.exit(1)
-
-    model_name = (results or curves).get('model', args.model)
-    out_dir = os.path.join(FIGURES_ROOT, benchmark, f'{args.model}_{args.channels}{suffix}')
-    os.makedirs(out_dir, exist_ok=True)
+    if is_strict:
+        results_path = os.path.join(RESULTS_ROOT, 'crossmodal_strict', args.model, 'results.json')
+        results = json.load(open(results_path)) if os.path.exists(results_path) else None
+        curves = None
+        if results is None:
+            print(f'ERROR: no results at {results_path}')
+            sys.exit(1)
+        model_name = results.get('config_name', args.model)
+        out_dir = os.path.join(FIGURES_ROOT, 'crossmodal_strict', args.model)
+        os.makedirs(out_dir, exist_ok=True)
+        subtype = args.subtype or 'fusion'
+        hist_key = {'eeg': 'eeg_history', 'aud': 'aud_history', 'fusion': 'fusion_history'}[subtype]
+        folds_data = results['folds']
+        # Validate history exists
+        for fe in folds_data:
+            if hist_key not in fe or not fe[hist_key]:
+                print(f'  Fold {fe.get("fold","?")}: no {hist_key} saved (re-run with updated script)')
+    else:
+        benchmark = f'{TYPE_MAP[args.type]}/{args.modality}'
+        suffix = 'mel' if args.modality == 'audio' else 'ch'
+        curves_path = os.path.join(RESULTS_ROOT, benchmark,
+                                   f'{args.model}_{args.channels}{suffix}_curves.json')
+        results_path = os.path.join(RESULTS_ROOT, benchmark,
+                                     f'{args.model}_{args.channels}{suffix}.json')
+        curves = json.load(open(curves_path)) if os.path.exists(curves_path) else None
+        results = json.load(open(results_path)) if os.path.exists(results_path) else None
+        if curves is None and results is None:
+            print(f'ERROR: no files found for {args.model}_{args.channels}ch')
+            sys.exit(1)
+        model_name = (results or curves).get('model', args.model)
+        out_dir = os.path.join(FIGURES_ROOT, benchmark, f'{args.model}_{args.channels}{suffix}')
+        os.makedirs(out_dir, exist_ok=True)
+        folds_data = _merge_folds(curves, results)
+        hist_key = 'history'
 
     # ── Confusion matrix ───────────────────────────────────────────────
     if args.cm:
@@ -204,7 +225,6 @@ def main():
             print('ERROR: no results JSON with confusion matrix data')
             sys.exit(1)
 
-        folds_data = _merge_folds(curves, results)
         show_all = args.all or args.fold is None
 
         if show_all:
@@ -261,7 +281,6 @@ def main():
             print('ERROR: no results JSON with ROC data')
             sys.exit(1)
 
-        folds_data = _merge_folds(curves, results)
         show_all = args.all or args.fold is None
 
         if show_all:
@@ -291,11 +310,6 @@ def main():
 
     # ── Training curves (bacc, acc, f1, sens, spec) ────────────────────
     if args.metric:
-        if curves is None:
-            print('ERROR: no curves JSON found')
-            sys.exit(1)
-
-        folds_data = curves['folds']
         show_all = args.all or args.fold is None
 
         if show_all:
@@ -304,7 +318,13 @@ def main():
             if k == 1:
                 axes = np.array([axes])
             for i, fe in enumerate(folds_data):
-                _plot_loss_metric(fig, axes[i], fe['history'],
+                hist = fe.get(hist_key)
+                if hist is None or len(hist.get('train_loss', [])) == 0:
+                    ax_l, ax_r = axes[i]
+                    ax_l.text(0.5, 0.5, 'No curves', ha='center', va='center', transform=ax_l.transAxes)
+                    ax_r.text(0.5, 0.5, 'No curves', ha='center', va='center', transform=ax_r.transAxes)
+                    continue
+                _plot_loss_metric(fig, axes[i], hist,
                                   fe.get('fold', i + 1), args.metric, show_legend=i == 0)
             name = f'all_folds_{args.metric}'
         else:
@@ -312,8 +332,12 @@ def main():
             if fe is None:
                 print(f'ERROR: fold {args.fold} not found')
                 sys.exit(1)
+            hist = fe.get(hist_key)
+            if hist is None or len(hist.get('train_loss', [])) == 0:
+                print(f'ERROR: fold {args.fold} has no training curves')
+                sys.exit(1)
             fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-            _plot_loss_metric(fig, axes, fe['history'],
+            _plot_loss_metric(fig, axes, hist,
                               args.fold, args.metric, show_legend=True)
             name = f'fold{args.fold}_{args.metric}'
 
@@ -326,12 +350,7 @@ def main():
         return
 
     # ── Default: loss + bacc for all folds ─────────────────────────────
-    if curves is None:
-        curves = results or {}
-        folds_data = curves.get('folds', [])
-    else:
-        folds_data = curves['folds']
-
+    folds_data = folds_data  # already loaded above
     show_all = args.all or args.fold is None
 
     if show_all:
@@ -340,8 +359,8 @@ def main():
         if k == 1:
             axes = np.array([axes])
         for i, fe in enumerate(folds_data):
-            hist = fe.get('history')
-            if hist is None:
+            hist = fe.get(hist_key)
+            if hist is None or len(hist.get('train_loss', [])) == 0:
                 ax_l, ax_r = axes[i]
                 ax_l.text(0.5, 0.5, 'No curves', ha='center', va='center', transform=ax_l.transAxes)
                 ax_r.text(0.5, 0.5, 'No curves', ha='center', va='center', transform=ax_r.transAxes)
@@ -353,8 +372,8 @@ def main():
         if fe is None:
             print(f'ERROR: fold {args.fold} not found')
             sys.exit(1)
-        hist = fe.get('history')
-        if hist is None:
+        hist = fe.get(hist_key)
+        if hist is None or len(hist.get('train_loss', [])) == 0:
             print(f'ERROR: fold {args.fold} has no training curves')
             sys.exit(1)
         fig, axes = plt.subplots(1, 2, figsize=(10, 4))

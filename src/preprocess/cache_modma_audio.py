@@ -14,10 +14,16 @@ Run once:
 Output:
   data/processed/audio_mel_cache.npz
 """
-import sys, os, glob, numpy as np, pandas as pd, warnings
+import sys
+import os
+import glob
+import numpy as np
+import pandas as pd
+import warnings
 import scipy.io.wavfile as wav
 from scipy.io.wavfile import WavFileWarning
-import torch, torchaudio
+import torch
+import torchaudio
  
 warnings.filterwarnings('ignore', category=WavFileWarning)
 sys.path.insert(0, '.')

@@ -10,7 +10,9 @@ Usage:
                                fusion='cross_attn', n_self_attn_layers=1)
   logits = model(z_eeg, z_audio, mask)  # [B, K, dim] → [B]
 """
-import torch, torch.nn as nn, math 
+import torch
+import torch.nn as nn
+import math 
 
 
 class RMSNorm(nn.Module):

@@ -14,10 +14,16 @@ Usage:
   py src/training/run_crossmodal.py --fusion concat --channels ftsm16
   py src/training/run_crossmodal.py --fusion concat --from-scratch
 """
-import sys, os, json, argparse, warnings, copy
+import sys
+import os
+import json
+import argparse
+import warnings
+import copy
 import numpy as np
-import torch, torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset, Dataset
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import confusion_matrix, roc_auc_score, balanced_accuracy_score
 

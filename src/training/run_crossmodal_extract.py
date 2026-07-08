@@ -5,7 +5,11 @@ Run ONCE before the ablation grid (Stage 2).
 Usage:
   py src/training/run_crossmodal_extract.py [--max-windows 50] [--epochs 100]
 """
-import sys, os, json, argparse, warnings
+import sys
+import os
+import json
+import argparse
+import warnings
 import numpy as np
 import torch
 from sklearn.model_selection import StratifiedGroupKFold
@@ -227,7 +231,7 @@ def main():
         print(f'  Train: {len(tr_eeg_i)}  Val: {len(vl_eeg_i)}  Test: {len(tei)}')
 
         # ── Train EEG backbone ──
-        print(f'  Training EEG backbone (DeepConvNet)...')
+        print('  Training EEG backbone (DeepConvNet)...')
         eeg_model, eeg_vb = train_eeg_backbone(
             tr_eeg_i, vl_eeg_i,
             eeg_data, eeg_labels.tolist(), eeg_ids,
@@ -238,7 +242,7 @@ def main():
         eeg_bb.to(device).eval()
 
         # ── Train Audio backbone ──
-        print(f'  Training Audio backbone (ShallowConvNet)...')
+        print('  Training Audio backbone (ShallowConvNet)...')
         aud_model, aud_vb = train_audio_backbone(
             tr_aud_i, vl_aud_i,
             aud_data, aud_labels.tolist(), aud_ids,

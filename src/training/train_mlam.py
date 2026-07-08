@@ -7,11 +7,18 @@ in a shared latent space using symmetric NT-Xent loss.
 Usage:
   py src/training/train_mlam.py [--config src/configs/config_mlam.yaml]
 """
-import sys, os, json, yaml, argparse, copy, random, warnings
+import sys
+import os
+import json
+import yaml
+import argparse
+import copy
+import random
+import warnings
 import numpy as np
-import torch, torch.nn as nn
+import torch
+import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import StratifiedGroupKFold
 
 warnings.filterwarnings('ignore')
@@ -22,7 +29,6 @@ sys.path.insert(0, '.')
 from src.models.deepconvnet import DeepConvNet
 from src.models.shallowconvnet import ShallowConvNet
 from src.models.latent_projection import LatentProjection
-from src.utils.training_logger import ClassificationLogger
 
 MAPPING_PATH = 'data/processed/multimodal_mapping.json'
 OUTPUT_DIR = 'outputs/results/mlam'

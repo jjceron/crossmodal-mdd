@@ -5,9 +5,15 @@ Backbones initialized from Fase 1 checkpoints, fine-tuned with low LR.
 Usage:
   py src/training/run_crossmodal_e2e.py [--max-windows 50] [--epochs 100] [--save-model]
 """
-import sys, os, json, argparse, copy, warnings
+import sys
+import os
+import json
+import argparse
+import copy
+import warnings
 import numpy as np
-import torch, torch.nn as nn
+import torch
+import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import confusion_matrix, roc_auc_score, balanced_accuracy_score
@@ -19,7 +25,7 @@ sys.path.insert(0, '.')
 
 from src.models.deepconvnet import DeepConvNet
 from src.models.shallowconvnet import ShallowConvNet
-from src.models.crossmodal_attn import CrossModalAttention, SelfAttentionBlock
+from src.models.crossmodal_attn import CrossModalAttention
 from src.utils.training_logger import ClassificationLogger
 
 EEG_CACHE = 'data/processed/eeg_preprocessed_64ch.npz'

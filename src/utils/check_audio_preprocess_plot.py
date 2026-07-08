@@ -6,7 +6,8 @@ Usage:
   python src/utils/check_audio_preprocess_plot.py
   python src/utils/check_audio_preprocess_plot.py --save
 """ 
-import os, sys, argparse
+import os
+import argparse
 import numpy as np
 import matplotlib
 matplotlib.use('Agg' if not os.environ.get('DISPLAY') and os.name != 'nt' else 'TkAgg')

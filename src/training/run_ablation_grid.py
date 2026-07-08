@@ -5,7 +5,10 @@ Requires run_crossmodal_extract.py to have completed first (cache in cache/cross
 Usage:
   py src/training/run_ablation_grid.py [--cache cache/crossmodal_features] [--sequential]
 """
-import sys, os, subprocess, argparse, time
+import sys
+import os
+import subprocess
+import argparse
 
 CONFIGS = [
     # (fusion, n_self_attn_layers, bottleneck_dim, param_control, label_suffix)
@@ -42,10 +45,10 @@ def main():
 
     if not os.path.exists(args.cache):
         print(f'ERROR: Cache not found at {args.cache}')
-        print(f'  Run: py src/training/run_crossmodal_extract.py first')
+        print('  Run: py src/training/run_crossmodal_extract.py first')
         sys.exit(1)
 
-    print(f'CrossModalAttention Ablation Grid (7 configs)')
+    print('CrossModalAttention Ablation Grid (7 configs)')
     print(f'Cache: {args.cache}')
     print(f'Sequential: {args.sequential}')
     print(f'{"=" * 60}')
@@ -84,7 +87,7 @@ def main():
 
     print(f'\n{"=" * 60}')
     print('Done. Results in outputs/results/crossmodal/')
-    print(f'Consolidated: outputs/results/crossmodal/consolidated_results.csv')
+    print('Consolidated: outputs/results/crossmodal/consolidated_results.csv')
 
 
 if __name__ == '__main__':

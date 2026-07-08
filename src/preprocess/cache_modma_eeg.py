@@ -28,7 +28,15 @@ Output:
   data/processed/eeg_preprocessed_{n_ch}ch.npz       (64, 19, 128)
   data/processed/eeg_preprocessed_ftsm{k}.npz         (FTSM subsets)
 """
-import sys, os, glob, json, argparse, numpy as np, pandas as pd, mne, warnings
+import sys
+import os
+import glob
+import json
+import argparse
+import numpy as np
+import pandas as pd
+import mne
+import warnings
 warnings.filterwarnings('ignore')
 sys.path.insert(0, '.')
 

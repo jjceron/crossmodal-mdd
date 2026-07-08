@@ -19,9 +19,15 @@ Usage:
   python src/training/dl_audio_benchmark.py --model deepconvnet --epochs 100
   python src/training/dl_audio_benchmark.py --model shallowconvnet --epochs 100 --save-model
 """
-import os, sys, warnings, json, argparse, copy
+import os
+import sys
+import warnings
+import json
+import argparse
+import copy
 import numpy as np
-import torch, torch.nn as nn
+import torch
+import torch.nn as nn
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import balanced_accuracy_score, confusion_matrix, roc_auc_score
 from torch.utils.data import Dataset, DataLoader
@@ -520,7 +526,7 @@ def main():
         print(f"  {'':->7s}-+-{'-' * 20}")
         for name, arr in [('bacc_opt', opt_baccs), ('acc_opt', opt_accs), ('f1_opt', opt_f1s)]:
             print(f"  {name:>7s} | {float(np.mean(arr)):>8.3f} {'+-':>2s} {float(np.std(arr)):>8.3f}")
-        print(f"\n  * thresholds optimized on validation set to maximize bacc")
+        print("\n  * thresholds optimized on validation set to maximize bacc")
         print(f"  {'Fold':>7s} | {'bacc_opt':>8s} | {tau + '*':>6s}")
         print(f"  {'':->7s}-+-{'-' * 18}")
         for r in fold_results:

@@ -16,7 +16,12 @@ Usage:
 Output:
   data/processed/ftsm_ranking.json
 """
-import sys, os, glob, json, argparse, warnings
+import sys
+import os
+import glob
+import json
+import argparse
+import warnings
 import numpy as np
 
 warnings.filterwarnings('ignore')
@@ -178,7 +183,7 @@ def main():
     valid_count = 0
     skipped = 0
 
-    print(f'Loading subjects and computing DTW matrices...')
+    print('Loading subjects and computing DTW matrices...')
     for sd in sub_dirs:
         sid = os.path.basename(sd)
         if sg.get(sid) not in ('MDD', 'HC'):
@@ -192,7 +197,7 @@ def main():
               f'({args.segment_sec}s segment, radius={args.radius})...')
         cm = compute_subject_cost_matrix(data, args.segment_sec, args.radius)
         all_cost_mats.append(cm)
-        print(f'    done')
+        print('    done')
 
     if valid_count == 0:
         print('ERROR: no valid subjects found')
@@ -233,7 +238,7 @@ def main():
     print(f'Top 16 (1-based): {subsets["16"]}')
     print(f'Top 32 (1-based): {subsets["32"]}')
     print(f'Top 64 (1-based): {subsets["64"][:10]}...')
-    print(f'Top 128         : all channels')
+    print('Top 128         : all channels')
 
 
 if __name__ == '__main__':
