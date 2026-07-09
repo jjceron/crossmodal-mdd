@@ -10,12 +10,29 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch.nn as nn
 
 sys.path.insert(0, '.')
 
 from src.models.crossmodal_attn import CrossModalAttention
 from src.models.deepconvnet import DeepConvNet
 from src.models.shallowconvnet import ShallowConvNet
+
+
+class DeepConvNetWrapper(nn.Module):
+    def __init__(self, n_channels, n_samples):
+        super().__init__()
+        self.m = DeepConvNet(n_channels, n_samples)
+    def forward(self, x):
+        return self.m(x)
+
+
+class ShallowConvNetWrapper(nn.Module):
+    def __init__(self, n_channels, n_samples):
+        super().__init__()
+        self.m = ShallowConvNet(n_channels, n_samples)
+    def forward(self, x):
+        return self.m(x)
 
 
 MODEL_PATH = Path('outputs/models/final_model.pt')
@@ -35,7 +52,7 @@ def test_final_model_forward():
     ckpt = torch.load(MODEL_PATH, map_location='cpu', weights_only=False)
     cfg = ckpt['config']
 
-    model = CrossModalAttention(
+    fusion_model = CrossModalAttention(
         eeg_dim=cfg['eeg_dim'], aud_dim=cfg['aud_dim'],
         hidden=cfg['hidden'], n_heads=cfg['n_heads'],
         bottleneck_dim=cfg.get('bottleneck_dim'),
