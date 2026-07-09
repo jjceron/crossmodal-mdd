@@ -27,17 +27,17 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import StratifiedGroupKFold, LeaveOneGroupOut
 from sklearn.metrics import balanced_accuracy_score, confusion_matrix, roc_auc_score
 
-warnings.filterwarnings('ignore')
-torch.backends.cudnn.benchmark = True
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-sys.path.insert(0, '.')
-
 from datetime import datetime
 import subprocess
 from src.models.crossmodal_attn import CrossModalAttention
 from src.models.deepconvnet import DeepConvNet
 from src.models.shallowconvnet import ShallowConvNet
 from src.utils.training_logger import ClassificationLogger
+
+warnings.filterwarnings('ignore')
+torch.backends.cudnn.benchmark = True
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+sys.path.insert(0, '.')
 
 # ── Backbone wrappers (squeeze output for BCEWithLogitsLoss) ──
 
@@ -643,7 +643,7 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
 
             # Window-level auxiliary loss
             if win_logits is not None:
-                B, K = ze.shape[0], ze.shape[1]
+                K = ze.shape[1]
                 y_win = yb.unsqueeze(1).expand(-1, K).reshape(-1)
                 mask_flat = m.reshape(-1)
                 win_loss = crit(win_logits, y_win * 0.95 + 0.025)
