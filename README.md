@@ -57,6 +57,7 @@ The main comparison is against unimodal DeepConvNet (EEG) and ShallowConvNet (sp
 
 *Work in progress.*
 
+
 ## Experiment Reports
 
 Selected experiments generate standardized reports through `scripts/generate_report.py`.
@@ -73,19 +74,23 @@ Each report includes:
 
 Reports are stored inside the project's `results/` directory and can be automatically published as CML comments during Pull Requests.
 
+## Methodology Audit
+
+A complete 0-leakage verification is documented in [`docs/appendix_aud.md`](docs/appendix_aud.md). The audit covers all 3 active scripts and confirms that no subject-leakage channels exist in the pipeline.
+
 ## Repository Structure
 
 ```text
 crossmodal-mdd/
 ├── src/
 │   ├── models/          — Neural network architectures
-│   ├── training/        — Training pipelines
+│   ├── training/        — 3 active training pipelines
 │   └── utils/           — Evaluation and utility functions
 ├── scripts/             — Training, analysis and report generation
 ├── configs/             — Hyperparameter configurations
 ├── data/                — Local datasets (not tracked)
 ├── results/             — Published experiment reports and figures
-├── docs/                — Paper source and documentation
+├── docs/                — Paper source, audit, and documentation
 ├── tests/               — Unit and integration tests
 ├── .github/             — GitHub Actions workflows (CI, CML)
 └── requirements.txt     — Project dependencies
