@@ -97,14 +97,19 @@ def _build_emb_wrapper(model_key, n_channels, n_samples, modality, bottleneck_di
                         nn.MaxPool2d((1, 2)), nn.Dropout2d(0.5))
                     dummy = torch.randn(1, 1, n_channels, n_samples)
                     with torch.no_grad():
-                        x = self.block1(dummy); x = self.block2(x)
-                        x = self.block3(x); x = self.block4(x)
+                        x = self.block1(dummy)
+                        x = self.block2(x)
+                        x = self.block3(x)
+                        x = self.block4(x)
                     self.embed_dim = int(x.numel())
                     self.classifier = nn.Identity()
                 def forward(self, x):
-                    if x.dim() == 3: x = x.unsqueeze(1)
-                    x = self.block1(x); x = self.block2(x)
-                    x = self.block3(x); x = self.block4(x)
+                    if x.dim() == 3:
+                        x = x.unsqueeze(1)
+                    x = self.block1(x)
+                    x = self.block2(x)
+                    x = self.block3(x)
+                    x = self.block4(x)
                     return self.classifier(x.flatten(start_dim=1)).squeeze(-1)
             m = Emb()
             return m, m.embed_dim
