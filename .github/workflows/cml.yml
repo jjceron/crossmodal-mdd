@@ -3,6 +3,10 @@ name: CML Experiment Report
 on:
   pull_request:
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   report:
     runs-on: ubuntu-latest
@@ -15,7 +19,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
+          cache: pip
 
       - name: Setup CML
         uses: iterative/setup-cml@v2
@@ -33,7 +37,20 @@ jobs:
         env:
           REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cml comment create report.md
+          cml comment create results/report.md
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: experiment-report
+          path: report.md
+
+      - name: Upload results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: experiment-results
+          path: results/
+          if-no-files-found: ignore
 
       - name: CML completed
         run: |
