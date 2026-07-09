@@ -90,10 +90,29 @@ def _plot_loss_metric(fig, axes, history, fold_num, metric_label, show_legend=Fa
 
 
 def _plot_cm_pair(fig, axes, fold_entry, fold_num, show_title=True):
+    has_window = 'test_cm_window' in fold_entry or 'test_cm_subject' in fold_entry
+    if not has_window:
+        cm = np.array(fold_entry['test_cm'])
+        ax = axes if not isinstance(axes, np.ndarray) else axes[0]
+        im = ax.imshow(cm, cmap='Blues', vmin=0, vmax=cm.max() if cm.max() > 0 else 1)
+        ax.set_xticks([0, 1])
+        ax.set_yticks([0, 1])
+        ax.set_xticklabels(['HC', 'MDD'])
+        ax.set_yticklabels(['HC', 'MDD'])
+        title = f'Fold {fold_num} — Subjects' if show_title else 'Subjects'
+        ax.set_title(title, fontsize=10)
+        for i in range(2):
+            for j in range(2):
+                ax.text(j, i, str(cm[i, j]), ha='center', va='center',
+                        fontsize=12, fontweight='bold',
+                        color='white' if cm[i, j] > cm.max() * 0.5 else 'black')
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        if isinstance(axes, np.ndarray):
+            axes[1].remove()
+        return
     ax_l, ax_r = axes
-    cm_w = np.array(fold_entry.get('test_cm_window', fold_entry.get('test_cm', [[0,0],[0,0]])))
-    cm_s = np.array(fold_entry.get('test_cm_subject', fold_entry.get('test_cm', [[0,0],[0,0]])))
-
+    cm_w = np.array(fold_entry['test_cm_window'])
+    cm_s = np.array(fold_entry['test_cm_subject'])
     for ax, cm, label in [(ax_l, cm_w, 'Windows'), (ax_r, cm_s, 'Subjects')]:
         im = ax.imshow(cm, cmap='Blues', vmin=0, vmax=cm.max() if cm.max() > 0 else 1)
         ax.set_xticks([0, 1])
@@ -224,10 +243,12 @@ def main():
             sys.exit(1)
 
         show_all = args.all or args.fold is None
+        has_window_data = any('test_cm_window' in f for f in folds_data)
+        n_cols = 2 if has_window_data else 1
 
         if show_all:
             k = len(folds_data)
-            fig, axes = plt.subplots(k, 2, figsize=(7, 3.2 * k), constrained_layout=True)
+            fig, axes = plt.subplots(k, n_cols, figsize=(7 if has_window_data else 3.5, 3.2 * k), constrained_layout=True)
             if k == 1:
                 axes = np.array([axes])
             for i, fe in enumerate(folds_data):
@@ -238,7 +259,7 @@ def main():
             if fe is None:
                 print(f'ERROR: fold {args.fold} not found')
                 sys.exit(1)
-            fig, axes = plt.subplots(1, 2, figsize=(7, 3.2))
+            fig, axes = plt.subplots(1, n_cols, figsize=(7 if has_window_data else 3.5, 3.2))
             _plot_cm_pair(fig, axes, fe, args.fold)
             name = f'fold{args.fold}_cm'
 
@@ -257,14 +278,20 @@ def main():
             sys.exit(1)
 
         folds_data = results['folds']
-        cm_w = np.sum([np.array(f.get('test_cm_window', f.get('test_cm', [[0,0],[0,0]]))) for f in folds_data], axis=0)
-        cm_s = np.sum([np.array(f.get('test_cm_subject', f.get('test_cm', [[0,0],[0,0]]))) for f in folds_data], axis=0)
-
-        fig, axes = plt.subplots(1, 2, figsize=(7, 3.2), constrained_layout=True)
-        fe = {'test_cm_window': cm_w, 'test_cm_subject': cm_s}
-        _plot_cm_pair(fig, axes, fe, 0, show_title=False)
-        axes[0].set_title('Overall — Windows', fontsize=10)
-        axes[1].set_title('Overall — Subjects', fontsize=10)
+        has_window_data = any('test_cm_window' in f for f in folds_data)
+        if has_window_data:
+            cm_w = np.sum([np.array(f['test_cm_window']) for f in folds_data], axis=0)
+            cm_s = np.sum([np.array(f['test_cm_subject']) for f in folds_data], axis=0)
+            fig, axes = plt.subplots(1, 2, figsize=(7, 3.2), constrained_layout=True)
+            fe = {'test_cm_window': cm_w, 'test_cm_subject': cm_s}
+            _plot_cm_pair(fig, axes, fe, 0, show_title=False)
+            axes[0].set_title('Overall — Windows', fontsize=10)
+            axes[1].set_title('Overall — Subjects', fontsize=10)
+        else:
+            cm = np.sum([np.array(f['test_cm']) for f in folds_data], axis=0)
+            fig, ax = plt.subplots(1, 1, figsize=(3.5, 3.2), constrained_layout=True)
+            fe = {'test_cm': cm.tolist()}
+            _plot_cm_pair(fig, ax, fe, 0, show_title=False)
         if args.save_png:
             fname = os.path.join(out_dir, 'overall_cm.png')
             fig.savefig(fname, dpi=150, bbox_inches='tight')
