@@ -989,7 +989,7 @@ def main():
             print(f'    Train subjects={len(tr_paired_list)}  Test subjects={len(te_paired)}')
 
             # Inner split for fusion head validation
-            inner_fusion = StratifiedGroupKFold(n_splits=3, shuffle=True,
+            inner_fusion = StratifiedGroupKFold(n_splits=5, shuffle=True,
                                                 random_state=RANDOM_STATE + fi)
             fuse_tr_i, fuse_vl_i = next(inner_fusion.split(
                 np.zeros(len(tr_paired_list)), y_tr,
