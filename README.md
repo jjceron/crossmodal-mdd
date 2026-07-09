@@ -125,7 +125,7 @@ Complete installation instructions are available in `requirements.txt`.
 
 ## Authors and Affiliation
 
-This project is part of **ACEMATE**, a research program of the Master's in Electrical Engineering at **Universidad Tecnológica de Panamá**.
+This project is part of **ACEMATE**, a research program of the Master's in Electrical Engineering at **Universidad Tecnológica de Pereira (UTP)**.
 
 - **Cerón-Ordoñez, J. J.** <a href="https://orcid.org/0009-0009-7320-4809"><img src="https://orcid.org/sites/default/files/images/orcid_16x16.png" width="16" alt="ORCID"/></a>
 
