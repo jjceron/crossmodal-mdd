@@ -20,7 +20,7 @@ dropout: 0.7
 n_self_attn_layers: 1
 self_attn_heads: 4
 self_attn_dropout: 0.1
-pooling: mean
+pooling: mean 
 
 # ── Backbone (frozen) ──
 backbone_eeg: DeepConvNet      # 34,361 params
