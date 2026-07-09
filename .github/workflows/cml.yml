@@ -1,16 +1,10 @@
-name: Continuous Integration
+name: CML Experiment Report
 
 on:
-  push:
-    branches:
-      - main
-      - develop
-      - "feature/**"
-
   pull_request:
 
 jobs:
-  build:
+  report:
     runs-on: ubuntu-latest
 
     steps:
@@ -23,20 +17,24 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
+      - name: Setup CML
+        uses: iterative/setup-cml@v2
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ruff
 
-      - name: Run Ruff
+      - name: Generate ML report
         run: |
-          ruff check .
+          python scripts/generate_report.py
 
-      - name: Compile Python files
+      - name: Publish CML report
+        env:
+          REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python -m compileall src
+          cml comment create report.md
 
-      - name: CI completed
+      - name: CML completed
         run: |
-          echo "✅ CI passed."
+          echo "✅ Report published."
