@@ -1,0 +1,83 @@
+# Mejor modelo cross-modal hasta la fecha (v0.1)
+# Cross-Attention con bottleneck=16 y dropout=0.7
+# BACC = 0.713 ± 0.110  |  AUC = 0.706 ± 0.137
+# 5-fold StratifiedGroupKFOV (subject-level, 0-leakage)
+# Commit: 62178c4
+# Fecha: 2026-07-09
+
+# ── Data ──
+eeg_cache: data/processed/eeg_preprocessed_64ch.npz
+audio_cache: data/processed/audio_mel_cache.npz
+mapping_path: data/processed/multimodal_mapping.json
+max_windows: 200
+
+# ── Arquitectura ──
+fusion: cross_attn
+hidden: 64
+n_heads: 2
+bottleneck_dim: 16
+dropout: 0.7
+n_self_attn_layers: 1
+self_attn_heads: 4
+self_attn_dropout: 0.1
+pooling: mean
+
+# ── Backbone (frozen) ──
+backbone_eeg: DeepConvNet      # 34,361 params
+backbone_aud: ShallowConvNet   # 37,849 params
+backbone_lr: 0.0005
+backbone_wd: 0.001
+backbone_epochs: 100
+backbone_patience: 15
+inner_cv_backbone: 5           # StratifiedGroupKFold
+
+# ── Fusion head ──
+fusion_lr: 0.0005
+fusion_wd: 0.001
+fusion_epochs: 100
+fusion_patience: 15
+batch_size: 8
+inner_cv_fusion: 3             # StratifiedGroupKFold (ver: cambiado a 5 en experimento E)
+pos_weight: dinámico           # n_HC / n_MDD por fold
+
+# ── Regularización ──
+augment: false
+adapter_dim: null
+window_aux: false
+mixup_alpha: 0.0
+feat_dropout: 0.0
+label_smoothing: true           # y * 0.95 + 0.025
+
+# ── Joint fine-tune ──
+joint_ft: false                 # no usado en este experimento
+
+# ── Reproducibilidad ──
+seed: 42
+cv_type: StratifiedGroupKFold
+n_folds: 5
+loocv: false
+
+# ── Comando de reproducción exacto ──
+comando: >
+  py src/training/train_crossmodal_strict.py
+  --fusion cross_attn
+  --hidden 64
+  --n-heads 2
+  --dropout 0.7
+  --bottleneck-dim 16
+  --max-windows 200
+  --epochs 100
+  --patience 15
+  --fusion-epochs 100
+  --fusion-patience 15
+  --lr-fusion 5e-4
+  --wd-fusion 1e-3
+
+# ── Resultados fold por fold ──
+results:
+  fold_1: {test_bacc: 0.750, test_auc: 0.812}
+  fold_2: {test_bacc: 0.900, test_auc: 0.800}
+  fold_3: {test_bacc: 0.708, test_auc: 0.833}
+  fold_4: {test_bacc: 0.583, test_auc: 0.583}
+  fold_5: {test_bacc: 0.625, test_auc: 0.500}
+  mean: {bacc: 0.713, bacc_std: 0.110, auc: 0.706, auc_std: 0.137}
