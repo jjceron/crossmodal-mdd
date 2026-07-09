@@ -15,9 +15,9 @@ import torch.nn as nn
 
 sys.path.insert(0, '.')
 
-from src.models.crossmodal_attn import CrossModalAttention
-from src.models.deepconvnet import DeepConvNet
-from src.models.shallowconvnet import ShallowConvNet
+from src.models.crossmodal_attn import CrossModalAttention  # noqa: E402
+from src.models.deepconvnet import DeepConvNet  # noqa: E402
+from src.models.shallowconvnet import ShallowConvNet  # noqa: E402
 
 
 class DeepConvNetWrapper(nn.Module):

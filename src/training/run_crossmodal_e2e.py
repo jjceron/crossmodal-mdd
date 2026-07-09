@@ -18,15 +18,15 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import confusion_matrix, roc_auc_score, balanced_accuracy_score
 
-from src.models.deepconvnet import DeepConvNet
-from src.models.shallowconvnet import ShallowConvNet
-from src.models.crossmodal_attn import CrossModalAttention
-from src.utils.training_logger import ClassificationLogger
-
-warnings.filterwarnings('ignore')
+sys.path.insert(0, '.')
 torch.backends.cudnn.benchmark = True
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-sys.path.insert(0, '.')
+warnings.filterwarnings('ignore')
+
+from src.models.deepconvnet import DeepConvNet  # noqa: E402
+from src.models.shallowconvnet import ShallowConvNet  # noqa: E402
+from src.models.crossmodal_attn import CrossModalAttention  # noqa: E402
+from src.utils.training_logger import ClassificationLogger  # noqa: E402
 
 EEG_CACHE = 'data/processed/eeg_preprocessed_64ch.npz'
 AUDIO_CACHE = 'data/processed/audio_mel_cache.npz'

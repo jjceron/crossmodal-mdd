@@ -26,14 +26,14 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import balanced_accuracy_score, confusion_matrix, roc_auc_score, accuracy_score, f1_score
-from src.models.crossmodal_attn import CrossModalAttention
-from src.models.deepconvnet import DeepConvNet
-from src.models.shallowconvnet import ShallowConvNet
-
+sys.path.insert(0, '.')
 warnings.filterwarnings('ignore')
 torch.backends.cudnn.benchmark = True
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-sys.path.insert(0, '.')
+
+from src.models.crossmodal_attn import CrossModalAttention  # noqa: E402
+from src.models.deepconvnet import DeepConvNet  # noqa: E402
+from src.models.shallowconvnet import ShallowConvNet  # noqa: E402
 
 # ── Backbone wrappers ──
 class DeepConvNetWrapper(nn.Module):
