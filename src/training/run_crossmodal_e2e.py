@@ -18,15 +18,15 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import confusion_matrix, roc_auc_score, balanced_accuracy_score
 
-warnings.filterwarnings('ignore')
-torch.backends.cudnn.benchmark = True
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-sys.path.insert(0, '.')
-
 from src.models.deepconvnet import DeepConvNet
 from src.models.shallowconvnet import ShallowConvNet
 from src.models.crossmodal_attn import CrossModalAttention
 from src.utils.training_logger import ClassificationLogger
+
+warnings.filterwarnings('ignore')
+torch.backends.cudnn.benchmark = True
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+sys.path.insert(0, '.')
 
 EEG_CACHE = 'data/processed/eeg_preprocessed_64ch.npz'
 AUDIO_CACHE = 'data/processed/audio_mel_cache.npz'
@@ -348,7 +348,7 @@ def train_e2e_fold(model, tr_loader, val_loader, args, fold_idx):
             # Window-level auxiliary loss
             if win_logits is not None:
                 # Repeat subject labels to window level
-                B, K = X_e.shape[0], X_e.shape[1]
+                K = X_e.shape[1]
                 y_win = yb.unsqueeze(1).expand(-1, K).reshape(-1)
                 mask_flat = mask.reshape(-1)
                 win_loss = crit(win_logits, y_win * 0.95 + 0.025)
@@ -554,7 +554,8 @@ def main():
 
         except Exception as e:
             print(f'  Fold {fi + 1} FAILED: {e}')
-            import traceback; traceback.print_exc()
+            import traceback
+            traceback.print_exc()
 
     if fold_results:
         baccs = [r['test_bacc'] for r in fold_results]
