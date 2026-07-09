@@ -208,7 +208,7 @@ class CrossModalAttention(nn.Module):
         Returns:
             logits: [B]  (or (logits, win_logits) if return_window)
         """
-        B, K = z_eeg.shape[0], z_eeg.shape[1]
+        B = z_eeg.shape[0]
 
         # 1. Adapter (parameter-efficient fine-tuning on raw backbone features)
         if hasattr(self, 'eeg_adapter'):

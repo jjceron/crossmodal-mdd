@@ -30,8 +30,14 @@ sys.path.insert(0, '.')
 AUDIO_DIR = 'data/raw/modma/854301_EEG_3Channels_Resting_Lanzhou_2015/854301_Audio_Lanzhou_2015/audio_lanzhou_2015'
 AUDIO_XLSX = 'data/raw/modma/854301_EEG_3Channels_Resting_Lanzhou_2015/854301_Audio_Lanzhou_2015/audio_lanzhou_2015/subjects_information_audio_lanzhou_2015.xlsx'
 
-SR_TARGET = 16000; N_MELS = 64; N_FFT = 1024; HOP = 160; N_FRAMES = 200
-OVERLAP = 0.5; N_WINS = 200; RANDOM_STATE = 42
+SR_TARGET = 16000
+N_MELS = 64
+N_FFT = 1024
+HOP = 160
+N_FRAMES = 200
+OVERLAP = 0.5
+N_WINS = 200
+RANDOM_STATE = 42
 
 
 def compute_mel(wav_path):

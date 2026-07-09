@@ -117,9 +117,11 @@ def compute_subject_cost_matrix(data, segment_sec, radius):
     use_fast = first_pair is not None
     if use_fast:
         from fastdtw import fastdtw
-        _dtw = lambda a, b: fastdtw(a, b, dist=lambda p, q: abs(p - q))[0]
+        def _dtw(a, b):
+            return fastdtw(a, b, dist=lambda p, q: abs(p - q))[0]
     else:
-        _dtw = lambda a, b: _dtw_sakoe_chiba(a, b, radius)
+        def _dtw(a, b):
+            return _dtw_sakoe_chiba(a, b, radius)
 
     for i in range(n):
         for j in range(i + 1, n):
