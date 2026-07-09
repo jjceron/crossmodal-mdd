@@ -91,8 +91,8 @@ def _plot_loss_metric(fig, axes, history, fold_num, metric_label, show_legend=Fa
 
 def _plot_cm_pair(fig, axes, fold_entry, fold_num, show_title=True):
     ax_l, ax_r = axes
-    cm_w = np.array(fold_entry['test_cm_window'])
-    cm_s = np.array(fold_entry['test_cm_subject'])
+    cm_w = np.array(fold_entry.get('test_cm_window', fold_entry.get('test_cm', [[0,0],[0,0]])))
+    cm_s = np.array(fold_entry.get('test_cm_subject', fold_entry.get('test_cm', [[0,0],[0,0]])))
 
     for ax, cm, label in [(ax_l, cm_w, 'Windows'), (ax_r, cm_s, 'Subjects')]:
         im = ax.imshow(cm, cmap='Blues', vmin=0, vmax=cm.max() if cm.max() > 0 else 1)
@@ -257,8 +257,8 @@ def main():
             sys.exit(1)
 
         folds_data = results['folds']
-        cm_w = np.sum([np.array(f['test_cm_window']) for f in folds_data], axis=0)
-        cm_s = np.sum([np.array(f['test_cm_subject']) for f in folds_data], axis=0)
+        cm_w = np.sum([np.array(f.get('test_cm_window', f.get('test_cm', [[0,0],[0,0]]))) for f in folds_data], axis=0)
+        cm_s = np.sum([np.array(f.get('test_cm_subject', f.get('test_cm', [[0,0],[0,0]]))) for f in folds_data], axis=0)
 
         fig, axes = plt.subplots(1, 2, figsize=(7, 3.2), constrained_layout=True)
         fe = {'test_cm_window': cm_w, 'test_cm_subject': cm_s}
