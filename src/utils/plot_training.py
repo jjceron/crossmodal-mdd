@@ -191,7 +191,6 @@ def main():
         if results is None:
             print(f'ERROR: no results at {results_path}')
             sys.exit(1)
-        model_name = results.get('config_name', args.model)
         out_dir = os.path.join(FIGURES_ROOT, 'crossmodal_strict', args.model)
         os.makedirs(out_dir, exist_ok=True)
         subtype = args.subtype or 'fusion'
@@ -213,7 +212,6 @@ def main():
         if curves is None and results is None:
             print(f'ERROR: no files found for {args.model}_{args.channels}ch')
             sys.exit(1)
-        model_name = (results or curves).get('model', args.model)
         out_dir = os.path.join(FIGURES_ROOT, benchmark, f'{args.model}_{args.channels}{suffix}')
         os.makedirs(out_dir, exist_ok=True)
         folds_data = _merge_folds(curves, results)
