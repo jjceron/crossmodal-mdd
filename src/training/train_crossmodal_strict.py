@@ -24,7 +24,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-from sklearn.model_selection import StratifiedGroupKFold
+from sklearn.model_selection import StratifiedGroupKFold, LeaveOneGroupOut
 from sklearn.metrics import balanced_accuracy_score, confusion_matrix, roc_auc_score
 
 warnings.filterwarnings('ignore')
@@ -100,6 +100,21 @@ def _select_windows_deterministic(windows, max_windows):
         return windows
     indices = np.linspace(0, n - 1, max_windows, dtype=int)
     return windows[indices]
+
+# ── Mixup helper ─────────────────────────────────────────────────────────
+
+def mixup_features(z_e, z_a, y, alpha=0.2):
+    """Apply mixup at subject level on pre-extracted features."""
+    if alpha <= 0:
+        return z_e, z_a, y, None
+    B = z_e.shape[0]
+    lam = np.random.beta(alpha, alpha, size=B).astype(np.float32)
+    lam = torch.from_numpy(lam).to(z_e.device)
+    perm = torch.randperm(B, device=z_e.device)
+    z_e_mix = lam.view(-1, 1, 1) * z_e + (1 - lam).view(-1, 1, 1) * z_e[perm]
+    z_a_mix = lam.view(-1, 1, 1) * z_a + (1 - lam).view(-1, 1, 1) * z_a[perm]
+    y_mix = lam * y + (1 - lam) * y[perm]
+    return z_e_mix, z_a_mix, y_mix, perm
 
 # ── Augmentation ──────────────────────────────────────────────────────────
 
@@ -381,9 +396,33 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
         for ze, za, m, yb in tr_ldr:
             ze, za, m, yb = ze.to(device), za.to(device), m.to(device), yb.to(device)
             opt.zero_grad()
-            logits = model(ze, za, mask=m)
+
+            # Mixup (if enabled)
+            if args.mixup_alpha > 0:
+                ze, za, yb, _ = mixup_features(ze, za, yb, args.mixup_alpha)
+
+            # Forward with optional window-level logits
+            return_window = args.window_aux and model.training
+            out = model(ze, za, mask=m, return_window=return_window)
+            if return_window:
+                logits, win_logits = out
+            else:
+                logits = out
+                win_logits = None
+
+            # Subject-level loss (label smoothing)
             y_smooth = yb * 0.95 + 0.025
             loss = crit(logits, y_smooth)
+
+            # Window-level auxiliary loss
+            if win_logits is not None:
+                B, K = ze.shape[0], ze.shape[1]
+                y_win = yb.unsqueeze(1).expand(-1, K).reshape(-1)
+                mask_flat = m.reshape(-1)
+                win_loss = crit(win_logits, y_win * 0.95 + 0.025)
+                win_loss = (win_loss * mask_flat).sum() / mask_flat.sum().clamp(min=1)
+                loss = loss + args.window_aux_weight * win_loss
+
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
@@ -531,6 +570,18 @@ def main():
                         help='Ratio of channels to drop for EEG augmentation')
     parser.add_argument('--save-model', action='store_true',
                         help='Save fusion head checkpoints per fold')
+    parser.add_argument('--adapter-dim', type=int, default=None,
+                        help='Bottleneck dim for LoRA-style adapter (None = disable)')
+    parser.add_argument('--window-aux', action='store_true',
+                        help='Auxiliary window-level classifier (multi-task)')
+    parser.add_argument('--window-aux-weight', type=float, default=0.3,
+                        help='Weight for window-level auxiliary loss')
+    parser.add_argument('--mixup-alpha', type=float, default=0.0,
+                        help='Mixup alpha (0 = disable)')
+    parser.add_argument('--feat-dropout', type=float, default=0.0,
+                        help='Dropout rate on projected hidden features')
+    parser.add_argument('--loocv', action='store_true',
+                        help='Use LOOCV (38 folds, one per paired subject) instead of 5-fold')
     args = parser.parse_args()
 
     cfg_name = f'{args.fusion}'
@@ -542,6 +593,16 @@ def main():
         cfg_name += '_cls'
     if args.augment:
         cfg_name += '_aug'
+    if args.adapter_dim is not None:
+        cfg_name += f'_ad{args.adapter_dim}'
+    if args.window_aux:
+        cfg_name += '_wax'
+    if args.mixup_alpha > 0:
+        cfg_name += f'_mix{args.mixup_alpha}'
+    if args.feat_dropout > 0:
+        cfg_name += f'_fd{args.feat_dropout}'
+    if args.loocv:
+        cfg_name += '_loocv'
     cfg_name += f'_w{args.max_windows}'
 
     out_dir = os.path.join(OUTPUT_DIR, cfg_name)
@@ -550,6 +611,8 @@ def main():
     print(f'Strict CrossModal — {cfg_name}')
     print(f'  Fusion={args.fusion}  Self-attn={args.n_self_attn_layers}L')
     print(f'  Augment={args.augment}  Max windows={args.max_windows}')
+    print(f'  Adapter dim={args.adapter_dim}  Window aux={args.window_aux}  Mixup alpha={args.mixup_alpha}')
+    print(f'  Feat dropout={args.feat_dropout}  LOOCV={args.loocv}')
     print(f'  Backbone: lr={args.lr} wd={args.wd} epochs={args.epochs}')
     print(f'  Fusion:   lr={args.lr_fusion} wd={args.wd_fusion} epochs={args.fusion_epochs}')
 
@@ -568,13 +631,17 @@ def main():
     labels = np.array([p[2] for p in pairs])
     group_ids = np.array([f'p{i}' for i in range(len(pairs))])
     print(f'  Paired subjects: {len(pairs)} ({int(labels.sum())} MDD, {len(pairs)-int(labels.sum())} HC)')
+    print(f'  CV: {"LOOCV (38 folds)" if args.loocv else "5-fold"}')
 
     # External CV on paired subjects
-    skf = StratifiedGroupKFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+    if args.loocv:
+        splitter = LeaveOneGroupOut()
+    else:
+        splitter = StratifiedGroupKFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE)
     fold_results = []
     fold_mapping = {}
 
-    for fi, (tvi, tei) in enumerate(skf.split(np.zeros(len(pairs)), labels, groups=group_ids)):
+    for fi, (tvi, tei) in enumerate(splitter.split(np.zeros(len(pairs)), labels, groups=group_ids)):
         print(f'\n{"="*60}')
         print(f'  Fold {fi + 1}')
         print(f'{"="*60}')
@@ -695,6 +762,8 @@ def main():
                 self_attn_heads=args.self_attn_heads,
                 self_attn_dropout=args.self_attn_dropout,
                 fusion=args.fusion, pooling=args.pooling, dropout=args.dropout,
+                adapter_dim=args.adapter_dim, window_aux=args.window_aux,
+                feat_dropout=args.feat_dropout,
             ).to(device)
 
             if fi == 0:
@@ -899,7 +968,7 @@ def main():
                 'n_paired': len(pairs),
                 'n_mdd_paired': int(labels.sum()),
                 'n_hc_paired': len(pairs) - int(labels.sum()),
-                'n_folds': N_FOLDS,
+                'n_folds': len(fold_results),
             },
             'config': {
                 'fusion': args.fusion,
@@ -924,6 +993,12 @@ def main():
                 'backbone_eeg': 'DeepConvNet',
                 'backbone_aud': 'ShallowConvNet',
                 'augment': args.augment,
+                'adapter_dim': args.adapter_dim,
+                'window_aux': args.window_aux,
+                'window_aux_weight': args.window_aux_weight,
+                'mixup_alpha': args.mixup_alpha,
+                'feat_dropout': args.feat_dropout,
+                'loocv': args.loocv,
             },
             'validation': validation,
             'test': test,

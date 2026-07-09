@@ -25,6 +25,29 @@ class RMSNorm(nn.Module):
         return x / rms * self.scale
 
 
+class WindowClassifier(nn.Module):
+    """Auxiliary window-level classifier for multi-task learning."""
+    def __init__(self, hidden):
+        super().__init__()
+        self.fc = nn.Linear(hidden * 2, hidden)
+        self.head = nn.Linear(hidden, 1)
+    def forward(self, e, a):
+        # e, a: [B, K, hidden]
+        B, K = e.shape[0], e.shape[1]
+        h = torch.relu(self.fc(torch.cat([e, a], dim=-1)))
+        return self.head(h.view(B * K, -1)).squeeze(-1)
+
+
+class Adapter(nn.Module):
+    """Bottleneck adapter with residual: dim → bottleneck → dim."""
+    def __init__(self, dim, bottleneck=32):
+        super().__init__()
+        self.down = nn.Linear(dim, bottleneck)
+        self.up = nn.Linear(bottleneck, dim)
+    def forward(self, x):
+        return x + self.up(torch.relu(self.down(x)))
+
+
 class AttentionPool(nn.Module):
     """Learnable weighted sum over node embeddings."""
     def __init__(self, dim):
@@ -105,12 +128,21 @@ class CrossModalAttention(nn.Module):
                  bottleneck_dim=None, n_self_attn_layers=0,
                  self_attn_heads=4, self_attn_dropout=0.1,
                  fusion='cross_attn', pooling='mean', dropout=0.5,
-                 param_control=False):
+                 param_control=False, adapter_dim=None, window_aux=False,
+                 feat_dropout=0.0):
         super().__init__()
         self.fusion = fusion
         self.pooling = pooling
         self.hidden = hidden
         self.bottleneck_dim = bottleneck_dim
+
+        # Feature dropout (applied after projection to hidden, during training)
+        self.feat_drop = nn.Dropout(feat_dropout) if feat_dropout > 0 else None
+
+        # Adapter (parameter-efficient fine-tuning on raw backbone features)
+        if adapter_dim is not None:
+            self.eeg_adapter = Adapter(eeg_dim, adapter_dim)
+            self.aud_adapter = Adapter(aud_dim, adapter_dim)
 
         # Optional bottleneck (compresses backbone output before projection)
         if bottleneck_dim is not None:
@@ -126,6 +158,10 @@ class CrossModalAttention(nn.Module):
 
         self.eeg_rms = RMSNorm(hidden)
         self.aud_rms = RMSNorm(hidden)
+
+        # Window-level auxiliary classifier
+        if window_aux:
+            self.win_cls = WindowClassifier(hidden)
 
         # Fusion
         if fusion == 'concat':
@@ -162,29 +198,44 @@ class CrossModalAttention(nn.Module):
             nn.Linear(hidden, 1),
         )
 
-    def forward(self, z_eeg, z_audio, mask=None):
+    def forward(self, z_eeg, z_audio, mask=None, return_window=False):
         """
         Args:
             z_eeg:   [B, K, eeg_dim]
             z_audio: [B, K, aud_dim]
             mask:    [B, K] — 1=valid window, 0=padding (or None)
+            return_window: if True, also return window-level logits
         Returns:
-            logits: [B]
+            logits: [B]  (or (logits, win_logits) if return_window)
         """
         B, K = z_eeg.shape[0], z_eeg.shape[1]
 
-        # 1. Optional bottleneck
+        # 1. Adapter (parameter-efficient fine-tuning on raw backbone features)
+        if hasattr(self, 'eeg_adapter'):
+            z_eeg = self.eeg_adapter(z_eeg)
+        if hasattr(self, 'aud_adapter'):
+            z_audio = self.aud_adapter(z_audio)
+
+        # 2. Optional bottleneck
         z_eeg_in = z_eeg
         z_audio_in = z_audio
         if self.bottleneck_dim is not None:
             z_eeg_in = torch.relu(self.eeg_bottleneck(z_eeg))
             z_audio_in = torch.relu(self.aud_bottleneck(z_audio))
 
-        # 2. Project to hidden
+        # 3. Project to hidden
         e = self.eeg_rms(self.eeg_proj(z_eeg_in))
         a = self.aud_rms(self.aud_proj(z_audio_in))
+        if self.training and self.feat_drop is not None:
+            e = self.feat_drop(e)
+            a = self.feat_drop(a)
 
-        # 3. Fusion
+        # Window-level auxiliary logits
+        win_logits = None
+        if return_window and hasattr(self, 'win_cls'):
+            win_logits = self.win_cls(e, a)  # [B*K]
+
+        # 4. Fusion
         if self.fusion == 'concat':
             z = self.concat_proj(torch.cat([e, a], dim=-1))
         elif self.fusion == 'gating':
@@ -215,4 +266,7 @@ class CrossModalAttention(nn.Module):
             z = self.pool(z)
 
         # 7. Classifier
-        return self.head(z).squeeze(-1)
+        logits = self.head(z).squeeze(-1)
+        if return_window:
+            return logits, win_logits
+        return logits
