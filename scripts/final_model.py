@@ -16,7 +16,6 @@ Output:
   - Adds 'final_model' section to the source results.json
 """
 import sys
-import os
 import json
 import copy
 import argparse
@@ -27,16 +26,14 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import balanced_accuracy_score, confusion_matrix, roc_auc_score, accuracy_score, f1_score
-from sklearn.model_selection import StratifiedGroupKFold
+from src.models.crossmodal_attn import CrossModalAttention
+from src.models.deepconvnet import DeepConvNet
+from src.models.shallowconvnet import ShallowConvNet
 
 warnings.filterwarnings('ignore')
 torch.backends.cudnn.benchmark = True
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 sys.path.insert(0, '.')
-
-from src.models.crossmodal_attn import CrossModalAttention
-from src.models.deepconvnet import DeepConvNet
-from src.models.shallowconvnet import ShallowConvNet
 
 # ── Backbone wrappers ──
 class DeepConvNetWrapper(nn.Module):
@@ -116,7 +113,6 @@ def _logits_to_binary(logits):
 
 def train_backbone(model, train_loader, val_loader, epochs=100, lr=5e-4, wd=1e-3, patience=15):
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=wd, foreach=False)
-    sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='max', factor=0.5, patience=5)
     crit = nn.BCEWithLogitsLoss()
     best_vb, best_st, pat = -1.0, None, 0
     for ep in range(1, epochs + 1):
@@ -290,7 +286,7 @@ def main():
     self_attn_dropout = cfg.get('self_attn_dropout', 0.1)
     pooling = cfg.get('pooling', 'mean')
 
-    print(f'Training final model on 100% data')
+    print('Training final model on 100% data')
     print(f'  Fusion={fusion_type} hidden={hidden} heads={n_heads} max_windows={max_windows}')
 
     # Load data
