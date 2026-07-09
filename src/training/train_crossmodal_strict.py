@@ -817,6 +817,8 @@ def main():
                          help='Max epochs for joint fine-tune phase')
     parser.add_argument('--joint-patience', type=int, default=10,
                          help='Patience for joint fine-tune phase')
+    parser.add_argument('--joint-bs', type=int, default=2,
+                         help='Batch size for joint fine-tune phase (lower to save GPU memory)')
     args = parser.parse_args()
 
     cfg_name = f'{args.fusion}'
@@ -843,6 +845,8 @@ def main():
         cfg_name += '_loocv'
     if args.joint_ft:
         cfg_name += '_joint'
+        if args.joint_bs != 2:
+            cfg_name += f'_jb{args.joint_bs}'
     cfg_name += f'_w{args.max_windows}'
 
     out_dir = os.path.join(OUTPUT_DIR, cfg_name)
@@ -1026,8 +1030,8 @@ def main():
                                              args.max_windows, indices=fuse_tr_i)
                 vl_jds = JointWindowDataset(eeg_dict, aud_dict, tr_paired_list,
                                              args.max_windows, indices=fuse_vl_i)
-                tr_jl = DataLoader(tr_jds, batch_size=args.bs, shuffle=True)
-                vl_jl = DataLoader(vl_jds, batch_size=args.bs, shuffle=False)
+                tr_jl = DataLoader(tr_jds, batch_size=args.joint_bs, shuffle=True)
+                vl_jl = DataLoader(vl_jds, batch_size=args.joint_bs, shuffle=False)
 
                 joint_model, joint_best_vb, joint_history = train_joint(
                     joint_model, tr_jl, vl_jl, args)
@@ -1289,6 +1293,7 @@ def main():
                 'joint_lr': args.joint_lr,
                 'joint_epochs': args.joint_epochs,
                 'joint_patience': args.joint_patience,
+                'joint_bs': args.joint_bs,
             },
             'validation': validation,
             'test': test,
