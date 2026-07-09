@@ -7,8 +7,6 @@
 ![CML](https://img.shields.io/badge/MLOps-CML-5A67D8)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
----
-
 ## Motivation
 
 Major depressive disorder (MDD) is among the leading causes of disability worldwide, yet objective diagnostic tools remain scarce. Electroencephalography (EEG) captures neural dynamics associated with affective regulation, while speech recordings encode paralinguistic biomarkers of depression. Together, these modalities provide complementary information about the same underlying disorder.
@@ -16,8 +14,6 @@ Major depressive disorder (MDD) is among the leading causes of disability worldw
 Most existing multimodal approaches combine EEG and speech only after each modality has already been independently compressed into a single embedding or prediction. Such late fusion strategies discard potentially informative interactions between cortical activity and acoustic representations.
 
 This repository investigates an **orchestrated cross-modal attention** architecture operating directly at the node level, where every EEG channel attends to every Mel-frequency band and vice versa before subject-level aggregation. All experiments are evaluated under a strict nested cross-validation protocol designed to eliminate subject leakage.
-
----
 
 ## Method Overview
 
@@ -32,8 +28,6 @@ This repository investigates an **orchestrated cross-modal attention** architect
 - **Stage 5 — Cross-modal fusion:** projected node embeddings interact through bidirectional multi-head cross-attention, optionally followed by self-attention layers. Window representations are aggregated and classified through a lightweight multilayer perceptron.
 
 - **Stage 6 — Subject-level inference:** window predictions are averaged to produce a single probability per subject, matching the clinical diagnosis task.
-
----
 
 ## Evaluation Protocol
 
@@ -59,13 +53,9 @@ Performance is reported using:
 
 The main comparison is against unimodal DeepConvNet (EEG) and ShallowConvNet (speech) trained under the exact same evaluation protocol.
 
----
-
 ## Key Results
 
 *Work in progress.*
-
----
 
 ## Experiment Reports
 
@@ -82,8 +72,6 @@ Each report includes:
 - execution metadata (date, runtime and Git commit)
 
 Reports are stored inside the project's `results/` directory and can be automatically published as CML comments during Pull Requests.
-
----
 
 ## Repository Structure
 
@@ -103,8 +91,6 @@ crossmodal-mdd/
 └── requirements.txt     — Project dependencies
 ```
 
----
-
 ## Data
 
 This repository uses the **Multi-modal Open Dataset for Mental-disorder Analysis (MODMA)**, a publicly available multimodal dataset developed for depression research using physiological, behavioral and clinical data ([Hu, 2022](#ref-hu2022); [Cai et al., 2020](#ref-cai2020)).
@@ -120,8 +106,6 @@ The complete MODMA collection includes multiple partially overlapping modalities
 This project focuses on the paired subset containing **resting-state EEG and speech recordings**, following a strict subject-level evaluation protocol to prevent information leakage. Unpaired EEG-only and speech-only subjects are used exclusively during unimodal backbone pre-training and are never included in multimodal evaluation.
 
 All data are obtained from the official MODMA repository under its corresponding data-use agreement. Participants provided informed consent, the study received institutional ethical approval, and personally identifiable information was removed before public release. Users of this repository are responsible for complying with the MODMA license and usage conditions.
-
----
 
 ## Requirements
 
@@ -139,8 +123,6 @@ Core dependencies include:
 
 Complete installation instructions are available in `requirements.txt`.
 
----
-
 ## Authors and Affiliation
 
 This project is part of **ACEMATE**, a research program of the Master's in Electrical Engineering at **Universidad Tecnológica de Panamá**.
@@ -148,8 +130,6 @@ This project is part of **ACEMATE**, a research program of the Master's in Elect
 - **Cerón-Ordoñez, J. J.** <a href="https://orcid.org/0009-0009-7320-4809"><img src="https://orcid.org/sites/default/files/images/orcid_16x16.png" width="16" alt="ORCID"/></a>
 
 - **Cárdenas-Peña, D. A.** <a href="https://orcid.org/0000-0002-0522-8683"><img src="https://orcid.org/sites/default/files/images/orcid_16x16.png" width="16" alt="ORCID"/></a>
-
----
 
 ## Bibliography
 
@@ -171,11 +151,7 @@ This project is part of **ACEMATE**, a research program of the Master's in Elect
 }
 ```
 
-Official dataset:
-
-https://reshare.ukdataservice.ac.uk/854301/
-
----
+Official dataset: https://reshare.ukdataservice.ac.uk/854301/
 
 <a id="ref-cai2020"></a>
 
@@ -191,7 +167,3 @@ https://reshare.ukdataservice.ac.uk/854301/
   url     = {https://arxiv.org/abs/2002.09283}
 }
 ```
-
-Preprint:
-
-https://arxiv.org/abs/2002.09283
