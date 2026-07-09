@@ -308,8 +308,6 @@ def _plot_ftsm(channel_arg, save_path):
     with open(FTSM_RANKING_PATH) as f:
         ranking_data = json.load(f)
     ranking = ranking_data['ranking']
-    scores = np.array([r['score'] for r in ranking])
-    # Map ranking order back to original channel order
     scores_orig = np.full(N_CHANS, np.nan)
     for r in ranking:
         scores_orig[r['channel'] - 1] = r['score']
