@@ -1,9 +1,9 @@
-# Mejor modelo cross-modal hasta la fecha (v0.1)
-# Cross-Attention con bottleneck=16 y dropout=0.7
+# Best cross-modal model so far (v0.1)
+# Cross-Attention with bottleneck=16 and dropout=0.7
 # BACC = 0.713 ± 0.110  |  AUC = 0.706 ± 0.137
-# 5-fold StratifiedGroupKFOV (subject-level, 0-leakage)
+# 5-fold StratifiedGroupKFold (subject-level, 0-leakage)
 # Commit: 62178c4
-# Fecha: 2026-07-09
+# Date: 2026-07-09
 
 # ── Data ──
 eeg_cache: data/processed/eeg_preprocessed_64ch.npz
@@ -11,7 +11,7 @@ audio_cache: data/processed/audio_mel_cache.npz
 mapping_path: data/processed/multimodal_mapping.json
 max_windows: 200
 
-# ── Arquitectura ──
+# ── Architecture ──
 fusion: cross_attn
 hidden: 64
 n_heads: 2
@@ -37,10 +37,10 @@ fusion_wd: 0.001
 fusion_epochs: 100
 fusion_patience: 15
 batch_size: 8
-inner_cv_fusion: 3             # StratifiedGroupKFold (ver: cambiado a 5 en experimento E)
-pos_weight: dinámico           # n_HC / n_MDD por fold
+inner_cv_fusion: 3             # StratifiedGroupKFold (note: changed to 5 in experiment E)
+pos_weight: dynamic            # n_HC / n_MDD per fold
 
-# ── Regularización ──
+# ── Regularization ──
 augment: false
 adapter_dim: null
 window_aux: false
@@ -49,16 +49,16 @@ feat_dropout: 0.0
 label_smoothing: true           # y * 0.95 + 0.025
 
 # ── Joint fine-tune ──
-joint_ft: false                 # no usado en este experimento
+joint_ft: false                 # not used in this experiment
 
-# ── Reproducibilidad ──
+# ── Reproducibility ──
 seed: 42
 cv_type: StratifiedGroupKFold
 n_folds: 5
 loocv: false
 
-# ── Comando de reproducción exacto ──
-comando: >
+# ── Exact reproduction command ──
+command: >
   py src/training/train_crossmodal_strict.py
   --fusion cross_attn
   --hidden 64
@@ -73,7 +73,7 @@ comando: >
   --lr-fusion 5e-4
   --wd-fusion 1e-3
 
-# ── Resultados fold por fold ──
+# ── Per-fold results ──
 results:
   fold_1: {test_bacc: 0.750, test_auc: 0.812}
   fold_2: {test_bacc: 0.900, test_auc: 0.800}
