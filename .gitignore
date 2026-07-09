@@ -14,7 +14,7 @@ env/
 # Raw & processed data (large datasets — not version-controlled)
 data/
 
-# Cache
+# Cache and docs
 cache/
 
 # Generated outputs (experiment results, figures)
@@ -24,9 +24,7 @@ outputs/
 tmp/
 
 # Documentation: only *.md at root level; exclude tex/ subfolder
-docs/*
-!docs/*.md
-docs/tex/
+docs/
 
 # OS artifacts
 .DS_Store
