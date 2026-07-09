@@ -35,7 +35,6 @@ def _parse_fase1(directory, modality):
         data = _load_json(path)
         s = data.get('summary', {})
         model_key = data.get('model_key', 'unknown')
-        n_channels = data.get('n_channels', data.get('n_mels', '?'))
         bottleneck = ''
         if 'bn' in model_key or 'bottleneck' in str(data.get('args', {})):
             bn_val = data.get('args', {}).get('bottleneck_dim', '')
