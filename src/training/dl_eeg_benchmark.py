@@ -17,7 +17,7 @@ Output per model:
 
 Usage:
   python src/training/dl_eeg_benchmark.py --model deepconvnet --channels 64 --epochs 100
-  python src/training/dl_eeg_benchmark.py --model deepconvnet --channels 19 --epochs 100
+  python src/training/dl_eeg_benchmark.py --model deepconvnet --channels 19 --epochs 100 
 """
 import os
 import sys
