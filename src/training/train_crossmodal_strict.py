@@ -538,6 +538,8 @@ def main():
         cfg_name += f'_self{args.n_self_attn_layers}L'
     if args.bottleneck_dim is not None:
         cfg_name += f'_bn{args.bottleneck_dim}'
+    if args.pooling == 'cls':
+        cfg_name += '_cls'
     if args.augment:
         cfg_name += '_aug'
     cfg_name += f'_w{args.max_windows}'
