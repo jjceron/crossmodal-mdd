@@ -29,15 +29,16 @@ from sklearn.metrics import balanced_accuracy_score, confusion_matrix, roc_auc_s
 
 from datetime import datetime
 import subprocess
-from src.models.crossmodal_attn import CrossModalAttention
-from src.models.deepconvnet import DeepConvNet
-from src.models.shallowconvnet import ShallowConvNet
-from src.utils.training_logger import ClassificationLogger
 
 warnings.filterwarnings('ignore')
 torch.backends.cudnn.benchmark = True
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 sys.path.insert(0, '.')
+
+from src.models.crossmodal_attn import CrossModalAttention  # noqa: E402
+from src.models.deepconvnet import DeepConvNet  # noqa: E402
+from src.models.shallowconvnet import ShallowConvNet  # noqa: E402
+from src.utils.training_logger import ClassificationLogger  # noqa: E402
 
 # ── Backbone wrappers (squeeze output for BCEWithLogitsLoss) ──
 
