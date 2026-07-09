@@ -280,7 +280,7 @@ def train_joint(joint_model, tr_loader, vl_loader, args):
 EEG_CACHE = 'data/processed/eeg_preprocessed_64ch.npz'
 AUDIO_CACHE = 'data/processed/audio_mel_cache.npz'
 MAPPING_PATH = 'data/processed/multimodal_mapping.json'
-OUTPUT_DIR = 'outputs/results/crossmodal_strict'
+OUTPUT_DIR = 'outputs/results/crossmodal'
 RANDOM_STATE = 42
 N_FOLDS = 5
 N_MELS = 64
@@ -1246,7 +1246,7 @@ def main():
 
         out_results = {
             'experiment': {
-                'name': 'crossmodal_strict',
+                'name': 'crossmodal',
                 'fusion': args.fusion,
                 'script': 'train_crossmodal_strict.py',
                 'timestamp': datetime.now().isoformat(),

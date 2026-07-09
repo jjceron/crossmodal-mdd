@@ -28,7 +28,7 @@ TYPE_MAP = {
     'classical_dl': 'classical_dl',
     'classical_ml': 'classical_ml',
     'ocampnet':     'ocampnet',
-    'crossmodal_strict': 'crossmodal_strict',
+    'crossmodal_strict': 'crossmodal',
 }
 
 
@@ -185,13 +185,13 @@ def main():
     is_strict = args.type == 'crossmodal_strict'
 
     if is_strict:
-        results_path = os.path.join(RESULTS_ROOT, 'crossmodal_strict', args.model, 'results.json')
+        results_path = os.path.join(RESULTS_ROOT, 'crossmodal', args.model, 'results.json')
         results = json.load(open(results_path)) if os.path.exists(results_path) else None
         curves = None
         if results is None:
             print(f'ERROR: no results at {results_path}')
             sys.exit(1)
-        out_dir = os.path.join(FIGURES_ROOT, 'crossmodal_strict', args.model)
+        out_dir = os.path.join(FIGURES_ROOT, 'crossmodal', args.model)
         os.makedirs(out_dir, exist_ok=True)
         subtype = args.subtype or 'fusion'
         hist_key = {'eeg': 'eeg_history', 'aud': 'aud_history', 'fusion': 'fusion_history'}[subtype]
