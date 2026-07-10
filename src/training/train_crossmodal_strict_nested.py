@@ -548,6 +548,14 @@ def main():
                         help='Custom suffix appended to config name for experiment tracking')
     args = parser.parse_args()
 
+    git_commit = ''
+    try:
+        git_commit = subprocess.check_output(
+            ['git', 'rev-parse', '--short', 'HEAD'],
+            stderr=subprocess.DEVNULL, text=True).strip()
+    except Exception:
+        git_commit = 'unknown'
+
     cfg_name = f'{args.fusion}'
     cfg_name += f'_h{args.hidden}'
     if args.n_self_attn_layers > 0:
@@ -964,6 +972,72 @@ def main():
                 }, os.path.join(ckpt_dir, f'fold_{fi+1}.pt'))
                 print(f'    Saved: fold_{fi+1}.pt')
 
+            # Partial save after each fold
+            partial_baccs = [r['test_bacc'] for r in fold_results]
+            partial_aucs = [r['test_auc'] for r in fold_results]
+            partial_test = {
+                'bacc_mean': float(np.mean(partial_baccs)),
+                'bacc_std': float(np.std(partial_baccs)),
+                'auc_mean': float(np.mean(partial_aucs)),
+                'auc_std': float(np.std(partial_aucs)),
+            }
+            partial_results = {
+                'experiment': {
+                    'name': 'crossmodal_nested',
+                    'fusion': args.fusion,
+                    'script': 'train_crossmodal_strict_nested.py',
+                    'timestamp': datetime.now().isoformat(),
+                    'git_commit': git_commit,
+                    'seed': RANDOM_STATE,
+                },
+                'data': {
+                    'n_eeg': len(eeg_dict),
+                    'n_audio': len(aud_dict),
+                    'n_paired': len(pairs),
+                    'n_mdd_paired': int(labels.sum()),
+                    'n_hc_paired': len(pairs) - int(labels.sum()),
+                    'n_folds': len(fold_results),
+                    'inner_fusion_folds': args.inner_folds,
+                },
+                'config': {
+                    'fusion': args.fusion,
+                    'hidden': args.hidden,
+                    'n_heads': args.n_heads,
+                    'dropout': args.dropout,
+                    'max_windows': args.max_windows,
+                    'n_self_attn_layers': args.n_self_attn_layers,
+                    'self_attn_heads': args.self_attn_heads,
+                    'self_attn_dropout': args.self_attn_dropout,
+                    'pooling': args.pooling,
+                    'bottleneck_dim': args.bottleneck_dim,
+                    'backbone_lr': args.lr,
+                    'backbone_wd': args.wd,
+                    'backbone_epochs': args.epochs,
+                    'backbone_patience': args.patience,
+                    'fusion_lr': args.lr_fusion,
+                    'fusion_wd': args.wd_fusion,
+                    'fusion_epochs': args.fusion_epochs,
+                    'fusion_patience': args.fusion_patience,
+                    'batch_size': args.bs,
+                    'backbone_eeg': 'DeepConvNet',
+                    'backbone_aud': 'ShallowConvNet',
+                    'augment': args.augment,
+                    'adapter_dim': args.adapter_dim,
+                    'window_aux': args.window_aux,
+                    'window_aux_weight': args.window_aux_weight,
+                    'mixup_alpha': args.mixup_alpha,
+                    'feat_dropout': args.feat_dropout,
+                    'loocv': args.loocv,
+                    'inner_fusion_folds': args.inner_folds,
+                },
+                'test': partial_test,
+                'folds': fold_results,
+                'partial': True,
+            }
+            partial_path = os.path.join(out_dir, 'results.json')
+            with open(partial_path, 'w') as f:
+                json.dump(partial_results, f, indent=2)
+
             del eeg_model, aud_model, fusion_model
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -1000,14 +1074,6 @@ def main():
             'auc_mean': float(np.mean(aucs)),
             'auc_std': float(np.std(aucs)),
         }
-
-        git_commit = ''
-        try:
-            git_commit = subprocess.check_output(
-                ['git', 'rev-parse', '--short', 'HEAD'],
-                stderr=subprocess.DEVNULL, text=True).strip()
-        except Exception:
-            git_commit = 'unknown'
 
         summary = {
             'bacc_mean': float(np.mean(baccs)),
