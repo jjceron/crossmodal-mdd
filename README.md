@@ -65,7 +65,7 @@ Selected experiments generate standardized reports through `scripts/generate_rep
 Each report includes:
 
 - experiment configuration
-- hyperparameters
+- hyperparameters 
 - validation and test metrics
 - confusion matrix
 - ROC curve
