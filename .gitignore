@@ -31,7 +31,7 @@ docs/
 Thumbs.db 
 desktop.ini
 
-# IDE / editor
+# IDE / editor 
 .vscode/
 .idea/
 
