@@ -13,9 +13,9 @@ Fix:
          on ~60-2=58 subjects instead of ~60)
       2. Extract features with those clean backbones
       3. Train fusion on inner_train, validate on inner_val
-    - Average val_bacc across inner folds for early stopping
+    - Average val_bacc and best_epoch across inner folds
     - Finally: train backbones on ALL tr_paired + unpaired (~60),
-      train fusion with best epoch
+      train fusion for avg_best_epoch (from inner CV) epochs
 
 Outer test subjects remain completely unseen throughout.
 
@@ -221,7 +221,7 @@ def train_backbone(model, train_loader, val_loader, args):
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd, foreach=False)
     sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='max', factor=0.5, patience=5)
     crit = nn.BCEWithLogitsLoss()
-    best_vb, best_st, pat = -1.0, None, 0
+    best_vb, best_st, pat, best_ep = -1.0, None, 0, 0
     logger = ClassificationLogger()
     logger.log_header()
     history = {k: [] for k in ('train_loss', 'val_loss', 'train_acc', 'val_acc',
@@ -262,6 +262,7 @@ def train_backbone(model, train_loader, val_loader, args):
         if vl_m['bacc'] > best_vb:
             best_vb = vl_m['bacc']
             best_st = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            best_ep = ep
             pat = 0
         else:
             pat += 1
@@ -271,7 +272,7 @@ def train_backbone(model, train_loader, val_loader, args):
             break
     if best_st is None:
         best_st = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-    return best_st, best_vb, history
+    return best_st, best_vb, best_ep, history
 
 # ── Feature extraction ──
 
@@ -372,7 +373,7 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
     n_hc = len(y_tr) - n_mdd
     pos_weight = torch.tensor([n_hc / max(n_mdd, 1)]).to(device)
     crit = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-    best_vb, best_st, pat = -1.0, None, 0
+    best_vb, best_st, pat, best_ep = -1.0, None, 0, 0
     logger = ClassificationLogger()
     logger.log_header()
     history = {k: [] for k in ('train_loss', 'val_loss', 'train_acc', 'val_acc',
@@ -439,6 +440,7 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
         if vl_m['bacc'] > best_vb:
             best_vb = vl_m['bacc']
             best_st = copy.deepcopy(model.state_dict())
+            best_ep = ep
             pat = 0
         else:
             pat += 1
@@ -451,7 +453,7 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
 
     if best_st is not None:
         model.load_state_dict(best_st)
-    return model, best_vb, history
+    return model, best_vb, best_ep, history
 
 # ── Mixup ──
 
@@ -635,7 +637,8 @@ def main():
             inner_splitter = StratifiedGroupKFold(n_splits=args.inner_folds, shuffle=True,
                                                   random_state=RANDOM_STATE + fi)
 
-            inner_best_vbs = []  # list of (best_val_bacc, state_dict) per inner fold
+            inner_best_vbs = []  # list of val_bacc per inner fold
+            inner_best_eps = []  # list of best_epoch per inner fold
             inner_folds_info = []  # list of dicts with subject IDs per inner fold
 
             for inner_fi, (fuse_tr_i, fuse_vl_i) in enumerate(
@@ -669,7 +672,7 @@ def main():
                 eeg_model = DeepConvNetWrapper(64, N_EEG_SAMPLES).to(device)
                 if fi == 0 and inner_fi == 0:
                     print(f'    EEG params: {sum(p.numel() for p in eeg_model.parameters()):,}')
-                eeg_best_st, eeg_best_vb, _ = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
+                eeg_best_st, eeg_best_vb, _, _ = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
                 eeg_model.load_state_dict(eeg_best_st)
                 eeg_model.eval()
                 del tr_ds, vl_ds, tr_ldr, vl_ldr
@@ -689,7 +692,7 @@ def main():
                 aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
                 if fi == 0 and inner_fi == 0:
                     print(f'    Audio params: {sum(p.numel() for p in aud_model.parameters()):,}')
-                aud_best_st, aud_best_vb, _ = train_backbone(aud_model, tr_ldr, vl_ldr, args)
+                aud_best_st, aud_best_vb, _, _ = train_backbone(aud_model, tr_ldr, vl_ldr, args)
                 aud_model.load_state_dict(aud_best_st)
                 aud_model.eval()
                 del tr_ds, vl_ds, tr_ldr, vl_ldr
@@ -726,7 +729,7 @@ def main():
                     feat_dropout=args.feat_dropout,
                 ).to(device)
 
-                fusion_model, _, _ = train_fusion_head(
+                fusion_model, _, fusion_best_ep, _ = train_fusion_head(
                     fusion_model,
                     Z_e_tr, Z_a_tr, mask_tr, y_inner_tr,
                     Z_e_vl, Z_a_vl, mask_vl, y_inner_vl,
@@ -743,8 +746,9 @@ def main():
                     yp.append(yp_s[0])
                     ypr.append(ypr_s[0])
                 inner_bacc = balanced_accuracy_score(np.array(yt), np.array(yp))
-                print(f'    >>> Inner fold {inner_fi + 1} val_bacc={inner_bacc:.3f}')
+                print(f'    >>> Inner fold {inner_fi + 1} val_bacc={inner_bacc:.3f}  best_ep={fusion_best_ep}')
                 inner_best_vbs.append(inner_bacc)
+                inner_best_eps.append(fusion_best_ep)
                 inner_folds_info.append({
                     'inner_fold': inner_fi + 1,
                     'inner_val_bacc': float(inner_bacc),
@@ -761,7 +765,10 @@ def main():
 
             # ── Aggregate inner CV results ──
             avg_inner_val = float(np.mean(inner_best_vbs))
-            print(f'\n  *** Inner CV avg val_bacc: {avg_inner_val:.3f} (over {len(inner_best_vbs)} folds) ***')
+            avg_best_ep = int(round(np.mean(inner_best_eps)))
+            final_fusion_epochs = max(1, min(avg_best_ep, args.fusion_epochs))
+            print(f'\n  *** Inner CV avg val_bacc={avg_inner_val:.3f}  avg_best_ep={avg_best_ep}  '
+                  f'final_fusion_epochs={final_fusion_epochs} ***')
 
             # ── Now train FINAL model on ALL tr_paired (no more validation needed) ──
             print('\n  --- Training FINAL backbones on ALL paired subjects ---')
@@ -780,7 +787,7 @@ def main():
             tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True)
             vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False)
             eeg_model = DeepConvNetWrapper(64, N_EEG_SAMPLES).to(device)
-            eeg_best_st, eeg_best_vb, eeg_history = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
+            eeg_best_st, eeg_best_vb, _, eeg_history = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
             eeg_model.load_state_dict(eeg_best_st)
             eeg_model.eval()
             del tr_ds, vl_ds, tr_ldr, vl_ldr
@@ -798,7 +805,7 @@ def main():
             tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True)
             vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False)
             aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
-            aud_best_st, aud_best_vb, aud_history = train_backbone(aud_model, tr_ldr, vl_ldr, args)
+            aud_best_st, aud_best_vb, _, aud_history = train_backbone(aud_model, tr_ldr, vl_ldr, args)
             aud_model.load_state_dict(aud_best_st)
             aud_model.eval()
             del tr_ds, vl_ds, tr_ldr, vl_ldr
@@ -853,12 +860,11 @@ def main():
             pos_weight = torch.tensor([n_hc / max(n_mdd, 1)]).to(device)
             crit = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
-            fusion_hist = {'train_loss': [], 'val_loss': [], 'train_acc': [],
-                           'val_acc': [], 'val_bacc': [], 'val_f1': [],
-                           'val_sens': [], 'val_spec': []}
-            for ep in range(1, args.fusion_epochs + 1):
+            fusion_hist = {'train_loss': [], 'train_acc': [], 'train_bacc': []}
+            for ep in range(1, final_fusion_epochs + 1):
                 fusion_model.train()
                 tr_loss, tr_n = 0.0, 0
+                tr_logits, tr_labels = [], []
                 for ze, za, m, yb in ld_all:
                     ze, za, m, yb = ze.to(device), za.to(device), m.to(device), yb.to(device)
                     opt.zero_grad()
@@ -872,9 +878,18 @@ def main():
                     opt.step()
                     tr_loss += loss.item() * yb.size(0)
                     tr_n += yb.size(0)
-                fusion_hist['train_loss'].append(float(tr_loss / tr_n))
+                    tr_logits.append(logits.detach())
+                    tr_labels.append(yb)
+                tr_loss /= tr_n
+                tr_pred = (torch.sigmoid(torch.cat(tr_logits)).cpu().numpy() >= 0.5).astype(int)
+                tr_true = torch.cat(tr_labels).cpu().numpy()
+                tr_bacc = balanced_accuracy_score(tr_true, tr_pred)
+                tr_acc = (tr_pred == tr_true).mean()
+                fusion_hist['train_loss'].append(float(tr_loss))
+                fusion_hist['train_acc'].append(float(tr_acc))
+                fusion_hist['train_bacc'].append(float(tr_bacc))
                 if ep == 1 or ep % 10 == 0:
-                    print(f'    Epoch {ep}: train_loss={tr_loss/tr_n:.4f}')
+                    print(f'    Epoch {ep}: train_loss={tr_loss:.4f}  train_bacc={tr_bacc:.3f}')
 
             # ── Evaluate on test subjects ──
             print('\n  --- Evaluating ---')
@@ -901,7 +916,11 @@ def main():
             fold_results.append({
                 'fold': fi + 1,
                 'inner_cv_val_bacc': avg_inner_val,
+                'inner_cv_best_epoch_mean': avg_best_ep,
+                'inner_cv_best_epoch_std': float(np.std(inner_best_eps)),
+                'final_fusion_epochs': final_fusion_epochs,
                 'inner_folds_val_baccs': [float(v) for v in inner_best_vbs],
+                'inner_folds_best_epochs': [int(e) for e in inner_best_eps],
                 'eeg_backbone_val_bacc': float(eeg_best_vb),
                 'aud_backbone_val_bacc': float(aud_best_vb),
                 'test_metrics': fm,
