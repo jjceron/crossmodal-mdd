@@ -542,6 +542,8 @@ def main():
     parser.add_argument('--loocv', action='store_true')
     parser.add_argument('--inner-folds', type=int, default=INNER_FUSION_FOLDS,
                         help='Number of inner CV folds for fusion validation (default: 3)')
+    parser.add_argument('--tag', type=str, default=None,
+                        help='Custom suffix appended to config name for experiment tracking')
     args = parser.parse_args()
 
     cfg_name = f'{args.fusion}'
@@ -569,6 +571,8 @@ def main():
     if args.inner_folds != 3:
         cfg_name += f'_inf{args.inner_folds}'
     cfg_name += f'_w{args.max_windows}'
+    if args.tag is not None:
+        cfg_name += f'_{args.tag}'
 
     out_dir = os.path.join(OUTPUT_DIR, cfg_name)
     os.makedirs(out_dir, exist_ok=True)
@@ -632,6 +636,7 @@ def main():
                                                   random_state=RANDOM_STATE + fi)
 
             inner_best_vbs = []  # list of (best_val_bacc, state_dict) per inner fold
+            inner_folds_info = []  # list of dicts with subject IDs per inner fold
 
             for inner_fi, (fuse_tr_i, fuse_vl_i) in enumerate(
                     inner_splitter.split(np.zeros(len(tr_paired)), y_tr,
@@ -740,6 +745,14 @@ def main():
                 inner_bacc = balanced_accuracy_score(np.array(yt), np.array(yp))
                 print(f'    >>> Inner fold {inner_fi + 1} val_bacc={inner_bacc:.3f}')
                 inner_best_vbs.append(inner_bacc)
+                inner_folds_info.append({
+                    'inner_fold': inner_fi + 1,
+                    'inner_val_bacc': float(inner_bacc),
+                    'inner_train_subjects': [p[0] for p in inner_tr_paired],
+                    'inner_val_subjects': [p[0] for p in inner_vl_paired],
+                    'eeg_backbone_subjects': eeg_bb_tr_cods,
+                    'aud_backbone_subjects': aud_bb_tr_cods,
+                })
 
                 # Cleanup
                 del eeg_model, aud_model, fusion_model
@@ -840,6 +853,9 @@ def main():
             pos_weight = torch.tensor([n_hc / max(n_mdd, 1)]).to(device)
             crit = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
+            fusion_hist = {'train_loss': [], 'val_loss': [], 'train_acc': [],
+                           'val_acc': [], 'val_bacc': [], 'val_f1': [],
+                           'val_sens': [], 'val_spec': []}
             for ep in range(1, args.fusion_epochs + 1):
                 fusion_model.train()
                 tr_loss, tr_n = 0.0, 0
@@ -856,6 +872,7 @@ def main():
                     opt.step()
                     tr_loss += loss.item() * yb.size(0)
                     tr_n += yb.size(0)
+                fusion_hist['train_loss'].append(float(tr_loss / tr_n))
                 if ep == 1 or ep % 10 == 0:
                     print(f'    Epoch {ep}: train_loss={tr_loss/tr_n:.4f}')
 
@@ -903,7 +920,12 @@ def main():
                 'test_subjects': [p[0] for p in te_paired],
                 'eeg_history': eeg_history,
                 'aud_history': aud_history,
-                'fusion_history': None,
+                'fusion_history': fusion_hist,
+                # Subject tracking
+                'train_subjects': [p[0] for p in tr_paired],
+                'eeg_backbone_subjects': eeg_bb_cods,
+                'aud_backbone_subjects': aud_bb_cods,
+                'inner_folds': inner_folds_info,
             })
             print(f'  Fold {fi + 1}: inner_cv_val={avg_inner_val:.3f}  '
                   f'test_bacc={bacc:.3f}  test_auc={roc_auc:.3f}')
