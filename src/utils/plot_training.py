@@ -29,6 +29,7 @@ TYPE_MAP = {
     'classical_ml': 'classical_ml',
     'ocampnet':     'ocampnet',
     'crossmodal_strict': 'crossmodal',
+    'crossmodal_nested': 'crossmodal_nested',
 }
 
 
@@ -66,7 +67,9 @@ def _plot_loss_metric(fig, axes, history, fold_num, metric_label, show_legend=Fa
     ax_l, ax_r = axes
 
     ax_l.plot(epochs, history['train_loss'], color='blue', linestyle='-', label='Train Loss', linewidth=1.5)
-    ax_l.plot(epochs, history['val_loss'], color='orange', linestyle='--', label='Val Loss', linewidth=1.5)
+    val_loss = history.get('val_loss', [])
+    if val_loss:
+        ax_l.plot(epochs, val_loss, color='orange', linestyle='--', label='Val Loss', linewidth=1.5)
     ax_l.set_xlabel('Epoch', fontsize=9)
     ax_l.set_ylabel('Loss', fontsize=9)
     ax_l.set_title(f'Fold {fold_num} — Loss', fontsize=10)
@@ -76,8 +79,12 @@ def _plot_loss_metric(fig, axes, history, fold_num, metric_label, show_legend=Fa
         ax_r.axis('off')
     else:
         mk = METRIC_KEYS[metric_label]
-        ax_r.plot(epochs, history['train_acc'], color='blue', linestyle='-', label='Train Acc', linewidth=1.5)
-        ax_r.plot(epochs, history[mk], color='orange', linestyle='--', label=f'Val {metric_label.upper()}', linewidth=1.5)
+        train_acc = history.get('train_acc', [])
+        if train_acc:
+            ax_r.plot(epochs, train_acc, color='blue', linestyle='-', label='Train Acc', linewidth=1.5)
+        val_metric = history.get(mk, [])
+        if val_metric:
+            ax_r.plot(epochs, val_metric, color='orange', linestyle='--', label=f'Val {metric_label.upper()}', linewidth=1.5)
         ax_r.set_xlabel('Epoch', fontsize=9)
         ax_r.set_ylabel(metric_label.upper(), fontsize=9)
         ax_r.set_title(f'Fold {fold_num} — {metric_label.upper()}', fontsize=10)
@@ -176,7 +183,7 @@ def main():
     parser = argparse.ArgumentParser(description='Plot training diagnostics')
     parser.add_argument('--type', type=str, required=True,
                         choices=list(TYPE_MAP.keys()),
-                        help='Experiment type: classical_dl, classical_ml, ocampnet, crossmodal_strict')
+                        help='Experiment type: classical_dl, classical_ml, ocampnet, crossmodal_strict, crossmodal_nested')
     parser.add_argument('--model', type=str, required=True,
                         help='Model key (e.g. deepconvnet)')
     parser.add_argument('--channels', type=int, default=64,
@@ -198,19 +205,20 @@ def main():
                         help='Save PNG instead of displaying')
     parser.add_argument('--subtype', type=str, default=None,
                         choices=['eeg', 'aud', 'fusion'],
-                        help='For crossmodal_strict: which history to plot (eeg, aud, fusion)')
+                        help='For crossmodal_strict/nested: which history to plot (eeg, aud, fusion)')
     args = parser.parse_args()
 
-    is_strict = args.type == 'crossmodal_strict'
+    is_strict = args.type in ('crossmodal_strict', 'crossmodal_nested')
 
     if is_strict:
-        results_path = os.path.join(RESULTS_ROOT, 'crossmodal', args.model, 'results.json')
+        bench = TYPE_MAP[args.type]
+        results_path = os.path.join(RESULTS_ROOT, bench, args.model, 'results.json')
         results = json.load(open(results_path)) if os.path.exists(results_path) else None
         curves = None
         if results is None:
             print(f'ERROR: no results at {results_path}')
             sys.exit(1)
-        out_dir = os.path.join(FIGURES_ROOT, 'crossmodal', args.model)
+        out_dir = os.path.join(FIGURES_ROOT, bench, args.model)
         os.makedirs(out_dir, exist_ok=True)
         subtype = args.subtype or 'fusion'
         hist_key = {'eeg': 'eeg_history', 'aud': 'aud_history', 'fusion': 'fusion_history'}[subtype]
