@@ -26,6 +26,10 @@ tmp/
 # Documentation: only *.md at root level; exclude tex/ subfolder
 docs/
 
+# Archives (large data transfer files)
+*.tar.gz
+*.tar
+
 # OS artifacts
 .DS_Store
 Thumbs.db 
