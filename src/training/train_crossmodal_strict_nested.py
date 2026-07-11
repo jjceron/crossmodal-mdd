@@ -169,10 +169,11 @@ class AudioAugment:
 # ── Window dataset ──
 
 class WindowDataset(Dataset):
-    def __init__(self, windows_list, labels_list, subj_names, indices, max_windows=None):
+    def __init__(self, windows_list, labels_list, subj_names, indices, max_windows=None, augmenter=None):
         self._windows = windows_list
         self._subj_names = subj_names
         self._labels = labels_list
+        self._augmenter = augmenter
         self._index = []
         for idx in indices:
             wins = windows_list[idx]
@@ -193,6 +194,8 @@ class WindowDataset(Dataset):
         idx, w_idx, label = self._index[i]
         w = self._windows[idx][w_idx].copy()
         w = _zscore(w)
+        if self._augmenter is not None:
+            w = self._augmenter(w)
         return torch.from_numpy(w).float(), torch.tensor(label, dtype=torch.float), self._subj_names[idx]
 
 # ── Backbone training ──
@@ -386,6 +389,7 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
         for ze, za, m, yb in tr_ldr:
             ze, za, m, yb = ze.to(device), za.to(device), m.to(device), yb.to(device)
             opt.zero_grad()
+            tr_labels.append(yb)
             if args.mixup_alpha > 0:
                 ze, za, yb, _ = mixup_features(ze, za, yb, args.mixup_alpha)
             return_window = args.window_aux and model.training
@@ -410,7 +414,6 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
             tr_loss += loss.item() * yb.size(0)
             tr_n += yb.size(0)
             tr_logits.append(logits.detach())
-            tr_labels.append(yb)
         tr_loss /= tr_n
         tr_pred = (torch.sigmoid(torch.cat(tr_logits)).cpu().numpy() >= 0.5).astype(int)
         tr_true = torch.cat(tr_labels).cpu().numpy()
@@ -532,6 +535,8 @@ def main():
     parser.add_argument('--fusion-patience', type=int, default=15)
     parser.add_argument('--bs', type=int, default=8)
     parser.add_argument('--augment', action='store_true')
+    parser.add_argument('--augment-backbone', action='store_true',
+                        help='Apply augmentation during backbone training (WindowDataset)')
     parser.add_argument('--noise-std', type=float, default=0.05)
     parser.add_argument('--time-mask-max', type=int, default=20)
     parser.add_argument('--channel-drop-ratio', type=float, default=0.15)
@@ -568,6 +573,8 @@ def main():
         cfg_name += '_cls'
     if args.augment:
         cfg_name += '_aug'
+    if args.augment_backbone:
+        cfg_name += '_bba'  # backbone augmentation
     if args.adapter_dim is not None:
         cfg_name += f'_ad{args.adapter_dim}'
     if args.window_aux:
@@ -589,7 +596,7 @@ def main():
     print(f'Device: {device}')
     print(f'Strict Nested CrossModal — {cfg_name}')
     print(f'  Fusion={args.fusion}  Self-attn={args.n_self_attn_layers}L')
-    print(f'  Augment={args.augment}  Max windows={args.max_windows}')
+    print(f'  Augment={args.augment}  AugmentBackbone={args.augment_backbone}  Max windows={args.max_windows}')
     print(f'  Adapter dim={args.adapter_dim}  Window aux={args.window_aux}  Mixup alpha={args.mixup_alpha}')
     print(f'  Feat dropout={args.feat_dropout}  LOOCV={args.loocv}')
     print(f'  Inner fusion folds={args.inner_folds}  (backbones re-trained per inner fold)')
@@ -602,6 +609,12 @@ def main():
     mapping = _load_mapping()
     eeg_dict = build_subject_dict(eeg_data, eeg_labels, eeg_cods)
     aud_dict = build_subject_dict(aud_data, aud_labels, aud_cods)
+
+    # ── Backbone augmentation (if enabled) ──
+    bb_eeg_aug = EEGAugment(noise_std=args.noise_std,
+                           time_mask_max=args.time_mask_max,
+                           channel_drop_ratio=args.channel_drop_ratio) if args.augment_backbone else None
+    bb_aud_aug = AudioAugment(noise_std=args.noise_std) if args.augment_backbone else None
 
     # Build paired list
     pairs = []
@@ -671,7 +684,7 @@ def main():
                     np.zeros(len(eeg_bb_tr_labels)), eeg_bb_tr_labels, groups=eeg_bb_tr_cods))
                 tr_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
                                       [eeg_bb_tr_i[i] for i in range(len(eeg_bb_tr_i))],
-                                      max_windows=args.max_windows)
+                                      max_windows=args.max_windows, augmenter=bb_eeg_aug)
                 vl_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
                                       [eeg_bb_vl_i[i] for i in range(len(eeg_bb_vl_i))],
                                       max_windows=args.max_windows)
@@ -691,7 +704,7 @@ def main():
                     np.zeros(len(aud_bb_tr_labels)), aud_bb_tr_labels, groups=aud_bb_tr_cods))
                 tr_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
                                        [aud_bb_tr_i[i] for i in range(len(aud_bb_tr_i))],
-                                       max_windows=args.max_windows)
+                                       max_windows=args.max_windows, augmenter=bb_aud_aug)
                 vl_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
                                       [aud_bb_vl_i[i] for i in range(len(aud_bb_vl_i))],
                                       max_windows=args.max_windows)
@@ -788,7 +801,7 @@ def main():
                 np.zeros(len(eeg_bb_labels)), eeg_bb_labels, groups=eeg_bb_cods))
             tr_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
                                   [eeg_f_tr_i[i] for i in range(len(eeg_f_tr_i))],
-                                  max_windows=args.max_windows)
+                                  max_windows=args.max_windows, augmenter=bb_eeg_aug)
             vl_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
                                    [eeg_f_vl_i[i] for i in range(len(eeg_f_vl_i))],
                                    max_windows=args.max_windows)
@@ -806,7 +819,7 @@ def main():
                 np.zeros(len(aud_bb_labels)), aud_bb_labels, groups=aud_bb_cods))
             tr_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
                                   [aud_f_tr_i[i] for i in range(len(aud_f_tr_i))],
-                                  max_windows=args.max_windows)
+                                  max_windows=args.max_windows, augmenter=bb_aud_aug)
             vl_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
                                    [aud_f_vl_i[i] for i in range(len(aud_f_vl_i))],
                                    max_windows=args.max_windows)
@@ -876,6 +889,7 @@ def main():
                 for ze, za, m, yb in ld_all:
                     ze, za, m, yb = ze.to(device), za.to(device), m.to(device), yb.to(device)
                     opt.zero_grad()
+                    tr_labels.append(yb)
                     if args.mixup_alpha > 0:
                         ze, za, yb, _ = mixup_features(ze, za, yb, args.mixup_alpha)
                     logits = fusion_model(ze, za, mask=m)
@@ -887,7 +901,6 @@ def main():
                     tr_loss += loss.item() * yb.size(0)
                     tr_n += yb.size(0)
                     tr_logits.append(logits.detach())
-                    tr_labels.append(yb)
                 tr_loss /= tr_n
                 tr_pred = (torch.sigmoid(torch.cat(tr_logits)).cpu().numpy() >= 0.5).astype(int)
                 tr_true = torch.cat(tr_labels).cpu().numpy()
@@ -1022,6 +1035,7 @@ def main():
                     'backbone_eeg': 'DeepConvNet',
                     'backbone_aud': 'ShallowConvNet',
                     'augment': args.augment,
+                    'augment_backbone': args.augment_backbone,
                     'adapter_dim': args.adapter_dim,
                     'window_aux': args.window_aux,
                     'window_aux_weight': args.window_aux_weight,
@@ -1132,6 +1146,7 @@ def main():
                 'backbone_eeg': 'DeepConvNet',
                 'backbone_aud': 'ShallowConvNet',
                 'augment': args.augment,
+                'augment_backbone': args.augment_backbone,
                 'adapter_dim': args.adapter_dim,
                 'window_aux': args.window_aux,
                 'window_aux_weight': args.window_aux_weight,

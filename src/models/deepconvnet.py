@@ -1,8 +1,7 @@
-"""DeepConvNet (Schirrmeister et al., 2017) — original capacity.
+"""DeepConvNet (Schirrmeister et al., 2017) — reduced for 6GB GPU.
 
 Original: 16→32→64→128 filters, ~136K params
-Reduced:   8→16→32→64  filters,  ~34K params (before H1)
-H1:       16→32→64→128 filters, ~146K params
+Reduced:   8→16→32→64  filters,  ~34K params
 """
 from __future__ import annotations
 
@@ -22,32 +21,32 @@ class DeepConvNet(nn.Module):
         super().__init__()
 
         self.block1 = nn.Sequential(
-            nn.Conv2d(1, 16, (1, 10)),  # before: 8
-            nn.BatchNorm2d(16),  # before: 8
+            nn.Conv2d(1, 8, (1, 10)),
+            nn.BatchNorm2d(8),
             nn.ELU(),
             nn.MaxPool2d((1, 3)),
             nn.Dropout2d(0.25),
         )
 
         self.block2 = nn.Sequential(
-            nn.Conv2d(16, 32, (n_channels, 1)),  # before: 8->16
-            nn.BatchNorm2d(32),  # before: 16
+            nn.Conv2d(8, 16, (n_channels, 1)),
+            nn.BatchNorm2d(16),
             nn.ELU(),
             nn.MaxPool2d((1, 3)),
             nn.Dropout2d(0.25),
         )
 
         self.block3 = nn.Sequential(
-            nn.Conv2d(32, 64, (1, 10)),  # before: 16->32
-            nn.BatchNorm2d(64),  # before: 32
+            nn.Conv2d(16, 32, (1, 10)),
+            nn.BatchNorm2d(32),
             nn.ELU(),
             nn.MaxPool2d((1, 3)),
             nn.Dropout2d(dropout),
         )
 
         self.block4 = nn.Sequential(
-            nn.Conv2d(64, 128, (1, 10)),  # before: 32->64
-            nn.BatchNorm2d(128),  # before: 64
+            nn.Conv2d(32, 64, (1, 10)),
+            nn.BatchNorm2d(64),
             nn.ELU(),
             nn.MaxPool2d((1, 3)),
             nn.Dropout2d(dropout),
