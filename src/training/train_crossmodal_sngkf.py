@@ -33,6 +33,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from sklearn.model_selection import StratifiedGroupKFold, LeaveOneGroupOut
 from sklearn.metrics import balanced_accuracy_score, confusion_matrix, roc_auc_score
 
@@ -54,13 +55,13 @@ from src.utils.training_logger import ClassificationLogger  # noqa: E402
 class DeepConvNetWrapper(nn.Module):
     def __init__(self, n_channels, n_samples):
         super().__init__()
-        self.m = DeepConvNet(n_channels, 1, n_samples, 0.5)
+        self.m = DeepConvNet(n_channels, 1, n_samples, 0.7)
     def forward(self, x): return self.m(x).squeeze(-1)
 
 class ShallowConvNetWrapper(nn.Module):
     def __init__(self, n_channels, n_samples):
         super().__init__()
-        self.m = ShallowConvNet(n_channels, 1, n_samples, 0.5)
+        self.m = ShallowConvNet(n_channels, 1, n_samples, 0.7)
     def forward(self, x): return self.m(x).squeeze(-1)
 
 # ── Data / constants ──
@@ -526,13 +527,13 @@ def main():
     parser.add_argument('--bottleneck-dim', type=int, default=None)
     parser.add_argument('--max-windows', type=int, default=50)
     parser.add_argument('--lr', type=float, default=5e-4)
-    parser.add_argument('--wd', type=float, default=1e-3)
-    parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--patience', type=int, default=15)
+    parser.add_argument('--wd', type=float, default=5e-3)
+    parser.add_argument('--epochs', type=int, default=200)
+    parser.add_argument('--patience', type=int, default=30)
     parser.add_argument('--lr-fusion', type=float, default=5e-4)
     parser.add_argument('--wd-fusion', type=float, default=1e-3)
-    parser.add_argument('--fusion-epochs', type=int, default=100)
-    parser.add_argument('--fusion-patience', type=int, default=15)
+    parser.add_argument('--fusion-epochs', type=int, default=200)
+    parser.add_argument('--fusion-patience', type=int, default=30)
     parser.add_argument('--bs', type=int, default=8)
     parser.add_argument('--augment', action='store_true')
     parser.add_argument('--augment-backbone', action='store_true',
@@ -787,9 +788,9 @@ def main():
             # ── Aggregate inner CV results ──
             avg_inner_val = float(np.mean(inner_best_vbs))
             avg_best_ep = int(round(np.mean(inner_best_eps)))
-            final_fusion_epochs = max(1, min(avg_best_ep, args.fusion_epochs))
+            final_fusion_epochs = args.fusion_epochs
             print(f'\n  *** Inner CV avg val_bacc={avg_inner_val:.3f}  avg_best_ep={avg_best_ep}  '
-                  f'final_fusion_epochs={final_fusion_epochs} ***')
+                  f'final_fusion_epochs={final_fusion_epochs} (cosine annealing) ***')
 
             # ── Now train FINAL model on ALL tr_paired (no more validation needed) ──
             print('\n  --- Training FINAL backbones on ALL paired subjects ---')
@@ -881,7 +882,8 @@ def main():
             pos_weight = torch.tensor([n_hc / max(n_mdd, 1)]).to(device)
             crit = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
-            fusion_hist = {'train_loss': [], 'train_acc': [], 'train_bacc': []}
+            scheduler = CosineAnnealingLR(opt, T_max=final_fusion_epochs)
+            fusion_hist = {'train_loss': [], 'train_acc': [], 'train_bacc': [], 'lr': []}
             for ep in range(1, final_fusion_epochs + 1):
                 fusion_model.train()
                 tr_loss, tr_n = 0.0, 0
@@ -901,16 +903,19 @@ def main():
                     tr_loss += loss.item() * yb.size(0)
                     tr_n += yb.size(0)
                     tr_logits.append(logits.detach())
+                scheduler.step()
                 tr_loss /= tr_n
                 tr_pred = (torch.sigmoid(torch.cat(tr_logits)).cpu().numpy() >= 0.5).astype(int)
                 tr_true = torch.cat(tr_labels).cpu().numpy()
                 tr_bacc = balanced_accuracy_score(tr_true, tr_pred)
                 tr_acc = (tr_pred == tr_true).mean()
+                current_lr = scheduler.get_last_lr()[0]
                 fusion_hist['train_loss'].append(float(tr_loss))
                 fusion_hist['train_acc'].append(float(tr_acc))
                 fusion_hist['train_bacc'].append(float(tr_bacc))
+                fusion_hist['lr'].append(float(current_lr))
                 if ep == 1 or ep % 10 == 0:
-                    print(f'    Epoch {ep}: train_loss={tr_loss:.4f}  train_bacc={tr_bacc:.3f}')
+                    print(f'    Epoch {ep}: train_loss={tr_loss:.4f}  train_bacc={tr_bacc:.3f}  lr={current_lr:.2e}')
 
             # ── Evaluate on test subjects ──
             print('\n  --- Evaluating ---')

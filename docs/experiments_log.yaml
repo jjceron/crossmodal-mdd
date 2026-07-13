@@ -1,0 +1,162 @@
+experiments:
+  - id: baseline_G
+    tag: ep200_inf5_epfix
+    git_commit: 16ca3b1
+    date: 2026-07-01
+    config:
+      backbones: small  # 34K DeepConvNet + 38K ShallowConvNet
+      hidden: 64
+      dropout: 0.7
+      max_windows: 200
+      fusion_epochs: 200
+      inner_folds: 5
+      augment: false
+      mixup_alpha: 0.0
+      bottleneck_dim: null
+      feat_dropout: 0.0
+    results:
+      test_bacc: 0.730
+      test_bacc_std: 0.081
+      test_auc: 0.730
+      test_auc_std: 0.085
+      inner_cv_val: 0.737
+      inner_cv_val_std: 0.034
+      folds_bacc: [0.875, 0.733, 0.708, 0.708, 0.625]
+    analysis: "Best so far. Small backbones outperform large ones consistently."
+
+  - id: H1
+    tag: H1
+    git_commit: b7643b1
+    date: 2026-07-05
+    config:
+      backbones: large  # 136K DeepConvNet + 151K ShallowConvNet
+      hidden: 64
+      dropout: 0.7
+      max_windows: 200
+    results:
+      test_bacc: null  # cancelled after 2 folds
+      folds_bacc: [0.625, 0.633]
+    status: cancelled
+    analysis: "Large backbones + hidden=64 worse than baseline. Cancelled after fold 2."
+
+  - id: H2
+    tag: H2
+    git_commit: a39d7a5
+    date: 2026-07-06
+    config:
+      backbones: large
+      hidden: 128
+      dropout: 0.5
+      max_windows: 200
+      inner_folds: 5
+    results:
+      test_bacc: 0.698
+      test_bacc_std: 0.119
+      test_auc: 0.713
+      test_auc_std: 0.155
+      inner_cv_val: 0.750
+      inner_cv_val_std: 0.019
+      folds_bacc: [0.875, 0.700, 0.708, 0.708, 0.500]
+    analysis: "Larger backbones + more capacity + less dropout = more overfitting. Fold 5 collapsed (0.500)."
+
+  - id: H3
+    tag: H3
+    git_commit: a39d7a5
+    date: 2026-07-08
+    config:
+      backbones: large
+      hidden: 128
+      dropout: 0.7
+      max_windows: 200
+      inner_folds: 5
+      augment: true
+      mixup_alpha: 0.2
+      bottleneck_dim: 32
+      feat_dropout: 0.2
+    results:
+      test_bacc: 0.693
+      test_bacc_std: 0.079
+      test_auc: 0.753
+      test_auc_std: 0.132
+      inner_cv_val: 0.727
+      inner_cv_val_std: 0.054
+      folds_bacc: [0.750, 0.800, 0.708, 0.583, 0.625]
+    analysis: "Too much regularization (bottleneck 32 + feat_dropout 0.2). Fold 4 collapsed. Over-regularized."
+
+  - id: H4a
+    tag: H4a
+    git_commit: current  # small backbones restored + mixup bug fix
+    date: 2026-07-10
+    config:
+      backbones: small  # restored from 16ca3b1
+      hidden: 64
+      dropout: 0.7
+      max_windows: 200
+      fusion_epochs: 200
+      inner_folds: 5
+      augment: false
+      mixup_alpha: 0.0
+      bottleneck_dim: null
+      feat_dropout: 0.0
+    results:
+      test_bacc: 0.743
+      test_bacc_std: 0.133
+      test_auc: 0.772
+      test_auc_std: 0.028
+      inner_cv_val: 0.768
+      inner_cv_val_std: 0.050
+      folds_bacc: [0.875, 0.800, 0.833, 0.708, 0.500]
+    analysis: "Best average so far (0.743). Folds 2-3 improved significantly vs baseline. Fold 5 collapsed (0.500) — same structural problem as H2. EEG backbone on fold 5 never learns (best val_bacc=0.562 at epoch 1). Need augmentation during backbone training to improve generalization on difficult folds."
+
+  - id: H7b
+    tag: H7b_reg_bb
+    git_commit: 5d177a2
+    date: 2026-07-12
+    config:
+      backbones: small  # 34K DeepConvNet + 38K ShallowConvNet
+      backbone_dropout: 0.7
+      backbone_wd: 0.005
+      backbone_epochs: 200
+      backbone_patience: 30
+      hidden: 64
+      n_heads: 1
+      dropout: 0.7
+      max_windows: 200
+      fusion_epochs: 200
+      fusion_patience: 30
+      fusion_scheduler: cosine
+      inner_folds: 5
+      augment: false
+      augment_backbone: false
+      mixup_alpha: 0.0
+      bottleneck_dim: null
+      feat_dropout: 0.0
+    results:
+      test_bacc: 0.793
+      test_bacc_std: 0.037
+      test_auc: 0.787
+      test_auc_std: 0.133
+      inner_cv_val: 0.710
+      inner_cv_val_std: 0.034
+      folds_bacc: [0.750, 0.800, 0.833, 0.833, 0.750]
+    analysis: "Best model so far (0.793±0.037). Variance reduced 3.6× vs H4a (0.133→0.037). Fold 5 rescued from 0.500→0.750. All folds ≥0.750. Backbone regularization (dropout=0.7, wd=5e-3) + cosine annealing + feat_dropout=0.0. Single-head cross-attention sufficient."
+
+  - id: H4b
+    tag: H4b
+    git_commit: current
+    date: 2026-07-10
+    config:
+      backbones: small
+      hidden: 64
+      dropout: 0.7
+      max_windows: 200
+      fusion_epochs: 200
+      inner_folds: 5
+      augment: false
+      augment_backbone: true
+      mixup_alpha: 0.0
+      bottleneck_dim: null
+      feat_dropout: 0.0
+    hypothesis: "Augmentation during backbone training (noise + time masking + channel dropout on each window) will produce more robust backbone features, especially helping fold 5 where the backbone collapses immediately."
+    results: null
+    status: pending
