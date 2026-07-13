@@ -160,3 +160,47 @@ experiments:
     hypothesis: "Augmentation during backbone training (noise + time masking + channel dropout on each window) will produce more robust backbone features, especially helping fold 5 where the backbone collapses immediately."
     results: null
     status: pending
+
+  - id: H7b_aug
+    tag: H7b_aug_inf5
+    git_commit: current
+    date: 2026-07-13
+    config:
+      backbones: small  # 34K DeepConvNet + 38K ShallowConvNet
+      backbone_dropout: 0.7
+      backbone_wd: 0.005
+      backbone_epochs: 200
+      backbone_patience: 30
+      hidden: 64
+      n_heads: 1
+      n_self_attn_layers: 1
+      dropout: 0.7
+      max_windows: 200
+      fusion_epochs: 200
+      fusion_patience: 30
+      fusion_scheduler: cosine
+      inner_folds: 5
+      lr_fusion: 5e-4
+      wd_fusion: 1e-3
+      augment: true
+      augment_backbone: false
+      mixup_alpha: 0.0
+      bottleneck_dim: null
+      feat_dropout: 0.0
+    seeds:
+      random: 42
+      numpy: 42
+      torch: 42
+      cuda_manual_seed_all: 42
+      benchmark: true
+      deterministic: false
+      PYTHONHASHSEED: 42
+    results:
+      test_bacc: 0.785
+      test_bacc_std: 0.086
+      test_auc: 0.881
+      test_auc_std: 0.092
+      inner_cv_val: 0.725
+      inner_cv_val_std: 0.029
+      folds_bacc: [0.875, 0.633, 0.833, 0.833, 0.750]
+    analysis: "Best reproducible result so far (bacc=0.785±0.086, auc=0.881±0.092). 100% reproducible with full seeds. Fold 2 weakest (0.633). Same config as H7b but with augment=true and inner_folds=5. Fusion head memorizes (train_bacc=1.0 at ~20 ep). Next: mixup during fusion."
