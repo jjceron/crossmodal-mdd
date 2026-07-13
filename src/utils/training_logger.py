@@ -28,12 +28,20 @@ class ClassificationLogger:
         t, p = np.array(true, dtype=int), np.array(pred, dtype=int)
         if not _check_binary(t, p):
             return {k: 0.0 for k in _KEYS_CLAS}
+        tp = int(((p == 1) & (t == 1)).sum())
+        tn = int(((p == 0) & (t == 0)).sum())
+        fp = int(((p == 1) & (t == 0)).sum())
+        fn = int(((p == 0) & (t == 1)).sum())
         return {
             'acc':  float(accuracy_score(t, p)),
             'bacc': float(balanced_accuracy_score(t, p)),
             'f1':   float(f1_score(t, p, zero_division=0)),
-            'sens': float(f1_score(t, p, pos_label=1, zero_division=0)),
-            'spec': float(f1_score(t, p, pos_label=0, zero_division=0)),
+            'tp':   tp,
+            'tn':   tn,
+            'fp':   fp,
+            'fn':   fn,
+            'sens': float(tp / max(tp + fn, 1e-12)),
+            'spec': float(tn / max(tn + fp, 1e-12)),
         }
 
     @staticmethod
