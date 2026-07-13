@@ -61,15 +61,16 @@ class DeepConvNet(nn.Module):
         self.fc_features = int(x.numel())
         self.classifier = nn.Linear(self.fc_features, n_classes)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward_features(self, x: Tensor) -> Tensor:
         if x.dim() == 3:
             x = x.unsqueeze(1)
         x = self.block1(x)
         x = self.block2(x)
         x = self.block3(x)
         x = self.block4(x)
-        x = x.flatten(start_dim=1)
-        x = self.classifier(x)
-        return x
+        return x.flatten(start_dim=1)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.classifier(self.forward_features(x))
 
 

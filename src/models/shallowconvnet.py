@@ -49,7 +49,7 @@ class ShallowConvNet(nn.Module):
         in_features = 24 * t_out
         self.classifier = nn.Linear(in_features, n_classes)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward_features(self, x: Tensor) -> Tensor:
         x = x.unsqueeze(1)
         x = self.temporal_conv(x)
         x = self.spatial_conv(x)
@@ -58,8 +58,9 @@ class ShallowConvNet(nn.Module):
         x = self.pool(x)
         x = torch.log(torch.clamp(x, min=1e-7))
         x = self.dropout(x)
-        x = x.flatten(start_dim=1)
-        x = self.classifier(x)
-        return x
+        return x.flatten(start_dim=1)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.classifier(self.forward_features(x))
 
 
