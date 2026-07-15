@@ -539,20 +539,28 @@ def main():
                         help='Custom suffix appended to config name for experiment tracking')
     parser.add_argument('--seed', type=int, nargs='+', default=[42],
                         help='Seed(s). Single: --seed 42. Multiple sequential: --seed 42 54 100')
+    parser.add_argument('--init-seed', type=int, nargs='+', default=None,
+                        help='Seed(s) for subject CV partition. When set, --seed is the fixed init seed.')
     args = parser.parse_args()
-    seeds = parse_seeds(args.seed)
-    for seed in seeds:
-        run_experiment(seed, args)
+    if args.init_seed is not None:
+        init_seed = parse_seeds(args.seed)[0]
+        for cv_seed in parse_seeds(args.init_seed):
+            run_experiment(init_seed, args, cv_seed=cv_seed)
+    else:
+        for seed in parse_seeds(args.seed):
+            run_experiment(seed, args)
 
 
-def run_experiment(seed, args):
+def run_experiment(seed, args, cv_seed=None):
     global RANDOM_STATE
     RANDOM_STATE = seed
     set_seed(RANDOM_STATE)
+    if cv_seed is None:
+        cv_seed = seed
 
-    if len(parse_seeds(args.seed)) > 1:
+    if len(parse_seeds(args.seed)) > 1 or (args.init_seed is not None and len(args.init_seed) > 1):
         print("\n" + "#" * 60)
-        print(f"  Seed run: {seed}")
+        print(f"  Seed run: init={seed}  partition={cv_seed}")
         print("#" * 60)
 
 
@@ -564,7 +572,7 @@ def run_experiment(seed, args):
     except Exception:
         git_commit = 'unknown'
 
-    cfg_name = f'mhcmattention_seed{RANDOM_STATE}_{args.fusion}'
+    cfg_name = f'mhcmattention_seed{RANDOM_STATE}_part{cv_seed}_{args.fusion}'
     cfg_name += f'_h{args.hidden}'
     if args.n_self_attn_layers > 0:
         cfg_name += f'_self{args.n_self_attn_layers}L'
@@ -633,7 +641,7 @@ def run_experiment(seed, args):
     if args.loocv:
         splitter = LeaveOneGroupOut()
     else:
-        splitter = StratifiedGroupKFold(n_splits=N_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+        splitter = StratifiedGroupKFold(n_splits=N_FOLDS, shuffle=True, random_state=cv_seed)
     fold_results = []
 
     for fi, (tvi, tei) in enumerate(splitter.split(np.zeros(len(pairs)), labels, groups=group_ids)):
@@ -659,7 +667,7 @@ def run_experiment(seed, args):
             # ── Inner CV for fusion validation ──
             y_tr = np.array([p[2] for p in tr_paired], dtype=np.float32)
             inner_splitter = StratifiedGroupKFold(n_splits=args.inner_folds, shuffle=True,
-                                                  random_state=RANDOM_STATE + fi)
+                                                  random_state=cv_seed + fi)
 
             inner_best_vbs = []  # list of val_bacc per inner fold
             inner_best_eps = []  # list of best_epoch per inner fold
@@ -681,7 +689,7 @@ def run_experiment(seed, args):
 
                 # ── Train clean EEG backbone ──
                 print('    Training clean EEG backbone (inner_vl excluded)...')
-                inner_seed = RANDOM_STATE + fi * 10 + inner_fi
+                inner_seed = cv_seed + fi * 10 + inner_fi
                 inner_bb_split = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=inner_seed)
                 eeg_bb_tr_i, eeg_bb_vl_i = next(inner_bb_split.split(
                     np.zeros(len(eeg_bb_tr_labels)), eeg_bb_tr_labels, groups=eeg_bb_tr_cods))
@@ -798,7 +806,7 @@ def run_experiment(seed, args):
             print('\n  --- Training FINAL backbones on ALL paired subjects ---')
 
             # Train EEG backbone on ALL tr_paired + unpaired
-            inner_seed = RANDOM_STATE + fi
+            inner_seed = cv_seed + fi
             final_bb_split = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=inner_seed)
             eeg_f_tr_i, eeg_f_vl_i = next(final_bb_split.split(
                 np.zeros(len(eeg_bb_labels)), eeg_bb_labels, groups=eeg_bb_cods))
