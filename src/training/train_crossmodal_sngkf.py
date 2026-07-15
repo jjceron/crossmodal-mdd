@@ -50,6 +50,7 @@ from src.models.crossmodal_attn import CrossModalAttention  # noqa: E402
 from src.models.deepconvnet import DeepConvNet  # noqa: E402
 from src.models.shallowconvnet import ShallowConvNet  # noqa: E402
 from src.utils.training_logger import ClassificationLogger  # noqa: E402
+from src.utils.get_seed import set_seed, parse_seeds  # noqa: E402
 
 # ── Backbone wrappers ──
 
@@ -80,11 +81,7 @@ N_MELS = 64
 N_AUDIO_SAMPLES = 200
 N_EEG_SAMPLES = 500
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-random.seed(RANDOM_STATE)
-np.random.seed(RANDOM_STATE)
-torch.manual_seed(RANDOM_STATE)
-torch.cuda.manual_seed_all(RANDOM_STATE)
-torch.backends.cudnn.deterministic = False
+set_seed(RANDOM_STATE)
 
 # ── Data loading (same as original) ──
 
@@ -541,7 +538,24 @@ def main():
                         help='Number of inner CV folds for fusion validation (default: 3)')
     parser.add_argument('--tag', type=str, default=None,
                         help='Custom suffix appended to config name for experiment tracking')
+    parser.add_argument('--seed', type=int, nargs='+', default=[42],
+                        help='Seed(s). Single: --seed 42. Multiple sequential: --seed 42 54 100')
     args = parser.parse_args()
+    seeds = parse_seeds(args.seed)
+    for seed in seeds:
+        run_experiment(seed, args)
+
+
+def run_experiment(seed, args):
+    global RANDOM_STATE
+    RANDOM_STATE = seed
+    set_seed(RANDOM_STATE)
+
+    if len(parse_seeds(args.seed)) > 1:
+        print("\n" + "#" * 60)
+        print(f"  Seed run: {seed}")
+        print("#" * 60)
+
 
     git_commit = ''
     try:
@@ -551,7 +565,7 @@ def main():
     except Exception:
         git_commit = 'unknown'
 
-    cfg_name = f'{args.fusion}'
+    cfg_name = f'mhcmattention_seed{RANDOM_STATE}_{args.fusion}'
     cfg_name += f'_h{args.hidden}'
     if args.n_self_attn_layers > 0:
         cfg_name += f'_self{args.n_self_attn_layers}L'
