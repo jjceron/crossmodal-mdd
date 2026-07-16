@@ -297,7 +297,7 @@ def main():
     print(f'  Avg windows/subject: {np.mean([w.shape[0] for w in all_wins]):.0f}')
     print(f'  Min/Max windows: {min(w.shape[0] for w in all_wins)}/{max(w.shape[0] for w in all_wins)}')
     print(f'  Shape per window: ({all_wins[0].shape[1]}, {all_wins[0].shape[2]})')
-    print(f'  Saved as object array — compatible with original training pipeline')
+    print('  Saved as object array — compatible with original training pipeline')
 
 
 if __name__ == '__main__':
