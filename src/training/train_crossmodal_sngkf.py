@@ -69,7 +69,7 @@ class ShallowConvNetWrapper(nn.Module):
 
 # ── Data / constants ──
 
-EEG_CACHE = 'data/processed/eeg_preprocessed_64ch.npz'
+EEG_CACHE_TPL = 'data/processed/eeg_preprocessed_{}.npz'
 AUDIO_CACHE = 'data/processed/audio_mel_cache.npz'
 MAPPING_PATH = 'data/processed/multimodal_mapping.json'
 OUTPUT_DIR = 'outputs/results/crossmodal_nested'
@@ -84,7 +84,8 @@ set_seed(RANDOM_STATE)
 
 # ── Data loading (same as original) ──
 
-def _load_eeg_cache(path=EEG_CACHE):
+def _load_eeg_cache(suffix='64ch'):
+    path = EEG_CACHE_TPL.format(suffix)
     c = np.load(path, allow_pickle=True)
     data = list(c['windows'])
     labels = c['labels'].astype(int)
@@ -534,6 +535,8 @@ def main():
     parser.add_argument('--window-aux-weight', type=float, default=0.3)
     parser.add_argument('--mixup-alpha', type=float, default=0.0)
     parser.add_argument('--feat-dropout', type=float, default=0.0)
+    parser.add_argument('--cache-suffix', type=str, default='64ch',
+                        help='EEG cache suffix (e.g. 64ch, 64ch_ica, 19ch, ftsm32)')
     parser.add_argument('--loocv', action='store_true')
     parser.add_argument('--outer-folds', type=int, default=N_FOLDS,
                         help='Number of outer CV folds (default: 5)')
@@ -593,7 +596,7 @@ def run_experiment(seed, args, cv_seed=None):
     print(f'  Fusion:   lr={args.lr_fusion} wd={args.wd_fusion} epochs={args.fusion_epochs}')
 
     # Load data
-    eeg_data, eeg_labels, eeg_cods = _load_eeg_cache()
+    eeg_data, eeg_labels, eeg_cods = _load_eeg_cache(args.cache_suffix)
     aud_data, aud_labels, aud_cods = _load_audio_cache()
     mapping = _load_mapping()
     eeg_dict = build_subject_dict(eeg_data, eeg_labels, eeg_cods)
