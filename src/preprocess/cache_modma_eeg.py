@@ -225,20 +225,13 @@ def main():
 
     os.makedirs('data/processed', exist_ok=True)
 
-    # Save as padded 4D array (avoids pickle MemoryError with large 128ch data)
-    max_w = max(w.shape[0] for w in all_wins)
-    n_subj = len(all_wins)
-    n_chan = all_wins[0].shape[1]
-    n_time = all_wins[0].shape[2]
-    padded = np.zeros((n_subj, max_w, n_chan, n_time), dtype=np.float32)
-    mask = np.zeros((n_subj, max_w), dtype=bool)
+    # Save as object array (variable-length per subject, compatible with original training pipeline)
+    obj_arr = np.empty(len(all_wins), dtype=object)
     for i, win in enumerate(all_wins):
-        nw = win.shape[0]
-        padded[i, :nw] = win
-        mask[i, :nw] = True
+        obj_arr[i] = win
 
     np.savez(out_path,
-             windows=padded, window_mask=mask,
+             windows=obj_arr,
              subject_ids=np.array(all_ids),
              labels=np.array(all_labels, dtype=np.int32))
     n_mdd = sum(all_labels)
@@ -247,8 +240,8 @@ def main():
     print(f'  Total windows: {sum(w.shape[0] for w in all_wins)}')
     print(f'  Avg windows/subject: {np.mean([w.shape[0] for w in all_wins]):.0f}')
     print(f'  Min/Max windows: {min(w.shape[0] for w in all_wins)}/{max(w.shape[0] for w in all_wins)}')
-    print(f'  Shape per window: ({n_chan}, {n_time})')
-    print(f'  Saved as contig array ({out_suffix}) — no pickle overhead')
+    print(f'  Shape per window: ({all_wins[0].shape[1]}, {all_wins[0].shape[2]})')
+    print(f'  Saved as object array — compatible with original training pipeline')
 
 
 if __name__ == '__main__':
