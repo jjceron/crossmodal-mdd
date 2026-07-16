@@ -170,7 +170,7 @@ class AudioAugment:
 # ── Window dataset ──
 
 class WindowDataset(Dataset):
-    def __init__(self, windows_list, labels_list, subj_names, indices, max_windows=None, augmenter=None):
+    def __init__(self, windows_list, labels_list, subj_names, indices, max_windows=None, augmenter=None, seed=None):
         self._windows = windows_list
         self._subj_names = subj_names
         self._labels = labels_list
@@ -184,7 +184,11 @@ class WindowDataset(Dataset):
             self._subj_std[idx] = wins.std() + 1e-8
             n = wins.shape[0]
             if max_windows is not None and n > max_windows:
-                keep = np.linspace(0, n - 1, max_windows, dtype=int)
+                if seed is not None:
+                    rng = np.random.RandomState(seed + idx)
+                    keep = rng.choice(n, max_windows, replace=False)
+                else:
+                    keep = np.linspace(0, n - 1, max_windows, dtype=int)
                 for k in keep:
                     self._index.append((idx, int(k), float(labels_list[idx])))
             else:
@@ -696,10 +700,10 @@ def run_experiment(seed, args, cv_seed=None):
                     np.zeros(len(eeg_bb_tr_labels)), eeg_bb_tr_labels, groups=eeg_bb_tr_cods))
                 tr_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
                                       [eeg_bb_tr_i[i] for i in range(len(eeg_bb_tr_i))],
-                                      max_windows=args.max_windows, augmenter=bb_eeg_aug)
+                                      max_windows=args.max_windows, augmenter=bb_eeg_aug, seed=inner_seed)
                 vl_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
                                       [eeg_bb_vl_i[i] for i in range(len(eeg_bb_vl_i))],
-                                      max_windows=args.max_windows)
+                                      max_windows=args.max_windows, seed=inner_seed)
                 tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True)
                 vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False)
                 eeg_model = DeepConvNetWrapper(64, N_EEG_SAMPLES).to(device)
@@ -716,10 +720,10 @@ def run_experiment(seed, args, cv_seed=None):
                     np.zeros(len(aud_bb_tr_labels)), aud_bb_tr_labels, groups=aud_bb_tr_cods))
                 tr_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
                                        [aud_bb_tr_i[i] for i in range(len(aud_bb_tr_i))],
-                                       max_windows=args.max_windows, augmenter=bb_aud_aug)
+                                       max_windows=args.max_windows, augmenter=bb_aud_aug, seed=inner_seed)
                 vl_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
                                       [aud_bb_vl_i[i] for i in range(len(aud_bb_vl_i))],
-                                      max_windows=args.max_windows)
+                                      max_windows=args.max_windows, seed=inner_seed)
                 tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True)
                 vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False)
                 aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
@@ -813,10 +817,10 @@ def run_experiment(seed, args, cv_seed=None):
                 np.zeros(len(eeg_bb_labels)), eeg_bb_labels, groups=eeg_bb_cods))
             tr_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
                                   [eeg_f_tr_i[i] for i in range(len(eeg_f_tr_i))],
-                                  max_windows=args.max_windows, augmenter=bb_eeg_aug)
+                                  max_windows=args.max_windows, augmenter=bb_eeg_aug, seed=inner_seed)
             vl_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
                                    [eeg_f_vl_i[i] for i in range(len(eeg_f_vl_i))],
-                                   max_windows=args.max_windows)
+                                   max_windows=args.max_windows, seed=inner_seed)
             tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True)
             vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False)
             eeg_model = DeepConvNetWrapper(64, N_EEG_SAMPLES).to(device)
@@ -831,10 +835,10 @@ def run_experiment(seed, args, cv_seed=None):
                 np.zeros(len(aud_bb_labels)), aud_bb_labels, groups=aud_bb_cods))
             tr_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
                                   [aud_f_tr_i[i] for i in range(len(aud_f_tr_i))],
-                                  max_windows=args.max_windows, augmenter=bb_aud_aug)
+                                  max_windows=args.max_windows, augmenter=bb_aud_aug, seed=inner_seed)
             vl_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
                                    [aud_f_vl_i[i] for i in range(len(aud_f_vl_i))],
-                                   max_windows=args.max_windows)
+                                   max_windows=args.max_windows, seed=inner_seed)
             tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True)
             vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False)
             aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
