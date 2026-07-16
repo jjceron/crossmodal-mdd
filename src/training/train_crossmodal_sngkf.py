@@ -107,9 +107,6 @@ def _load_mapping(path=MAPPING_PATH):
     with open(path) as f:
         return json.load(f)['orig_to_bids']
 
-def _zscore(w):
-    return (w - w.mean()) / (w.std() + 1e-8)
-
 def _select_windows_deterministic(windows, max_windows):
     n = windows.shape[0]
     if n <= max_windows:
@@ -178,12 +175,15 @@ class WindowDataset(Dataset):
         self._labels = labels_list
         self._augmenter = augmenter
         self._index = []
+        self._subj_mean = {}
+        self._subj_std = {}
         for idx in indices:
             wins = windows_list[idx]
+            self._subj_mean[idx] = wins.mean()
+            self._subj_std[idx] = wins.std() + 1e-8
             n = wins.shape[0]
             if max_windows is not None and n > max_windows:
-                rng = np.random.RandomState(RANDOM_STATE + idx)
-                keep = rng.choice(n, max_windows, replace=False)
+                keep = np.linspace(0, n - 1, max_windows, dtype=int)
                 for k in keep:
                     self._index.append((idx, int(k), float(labels_list[idx])))
             else:
@@ -196,7 +196,7 @@ class WindowDataset(Dataset):
     def __getitem__(self, i):
         idx, w_idx, label = self._index[i]
         w = self._windows[idx][w_idx].copy()
-        w = _zscore(w)
+        w = (w - self._subj_mean[idx]) / self._subj_std[idx]
         if self._augmenter is not None:
             w = self._augmenter(w)
         return torch.from_numpy(w).float(), torch.tensor(label, dtype=torch.float), self._subj_names[idx]
@@ -306,8 +306,10 @@ def extract_subject_features(eeg_model, aud_model, eeg_wins, aud_wins,
     wa = aud_wins.copy()
     K = min(len(we), len(wa))
     we, wa = we[:K], wa[:K]
-    we = np.array([_zscore(we[i]) for i in range(K)])
-    wa = np.array([_zscore(wa[i]) for i in range(K)])
+    eeg_mu, eeg_sig = we.mean(), we.std() + 1e-8
+    aud_mu, aud_sig = wa.mean(), wa.std() + 1e-8
+    we = (we - eeg_mu) / eeg_sig
+    wa = (wa - aud_mu) / aud_sig
     if eeg_augment is not None:
         we = np.array([eeg_augment(we[i]) for i in range(K)])
     if aud_augment is not None:
