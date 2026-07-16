@@ -473,6 +473,21 @@ def evaluate_fusion(model, Z_e, Z_a, mask, y_true):
     preds = (probs >= 0.5).astype(int)
     return y_true, preds, probs
 
+
+def evaluate_fusion_majority(model, Z_e, Z_a, mask, y_true):
+    """Per-window logits → majority vote per subject."""
+    model.eval()
+    with torch.no_grad():
+        win_logits = model.forward_per_window(
+            torch.FloatTensor(Z_e).to(device),
+            torch.FloatTensor(Z_a).to(device),
+            mask=torch.FloatTensor(mask).to(device))
+        win_probs = torch.sigmoid(win_logits).cpu().numpy()
+    win_preds = (win_probs >= 0.5).astype(int)
+    preds = np.array([1 if wp.sum() > wp.shape[0] / 2 else 0 for wp in win_preds])
+    probs = np.array([wp.mean() for wp in win_probs])
+    return y_true, preds, probs
+
 # ── Build subject index helpers ──
 
 def build_subject_dict(data_list, labels_arr, cods_list):
@@ -530,6 +545,8 @@ def main():
     parser.add_argument('--time-mask-max', type=int, default=20)
     parser.add_argument('--channel-drop-ratio', type=float, default=0.15)
     parser.add_argument('--save-model', action='store_true')
+    parser.add_argument('--majority-vote', action='store_true',
+                        help='Use per-window majority voting instead of feature pooling')
     parser.add_argument('--adapter-dim', type=int, default=None)
     parser.add_argument('--window-aux', action='store_true')
     parser.add_argument('--window-aux-weight', type=float, default=0.3)
@@ -594,6 +611,9 @@ def run_experiment(seed, args, cv_seed=None):
     print(f'  Inner fusion folds={args.inner_folds}  (backbones re-trained per inner fold)')
     print(f'  Backbone: lr={args.lr} wd={args.wd} epochs={args.epochs}')
     print(f'  Fusion:   lr={args.lr_fusion} wd={args.wd_fusion} epochs={args.fusion_epochs}')
+    print(f'  Majority vote: {args.majority_vote}')
+
+    _eval_fn = evaluate_fusion_majority if args.majority_vote else evaluate_fusion
 
     # Load data
     eeg_data, eeg_labels, eeg_cods = _load_eeg_cache(args.cache_suffix)
@@ -751,7 +771,7 @@ def run_experiment(seed, args, cv_seed=None):
                 # Evaluate on inner validation
                 yt, yp, ypr = [], [], []
                 for si in range(len(inner_vl_paired)):
-                    yt_s, yp_s, ypr_s = evaluate_fusion(
+                    yt_s, yp_s, ypr_s = _eval_fn(
                         fusion_model,
                         Z_e_vl[si:si+1], Z_a_vl[si:si+1],
                         mask_vl[si:si+1], y_inner_vl[si:si+1])
@@ -912,7 +932,7 @@ def run_experiment(seed, args, cv_seed=None):
             print('\n  --- Evaluating ---')
             y_true_list, y_pred_list, y_prob_list = [], [], []
             for si in range(len(te_paired)):
-                yt, yp, ypr = evaluate_fusion(
+                yt, yp, ypr = _eval_fn(
                     fusion_model,
                     Z_e_te[si:si+1], Z_a_te[si:si+1],
                     mask_te[si:si+1], y_te[si:si+1])

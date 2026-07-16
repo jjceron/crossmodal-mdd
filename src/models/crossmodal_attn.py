@@ -198,6 +198,63 @@ class CrossModalAttention(nn.Module):
             nn.Linear(hidden, 1),
         )
 
+    def _encode(self, z_eeg, z_audio, mask=None):
+        """Shared encoding: adapter → bottleneck → proj → fusion → self-attn.
+
+        Returns:
+            z: [B, K, hidden] — per-window features after self-attention
+        """
+        if hasattr(self, 'eeg_adapter'):
+            z_eeg = self.eeg_adapter(z_eeg)
+        if hasattr(self, 'aud_adapter'):
+            z_audio = self.aud_adapter(z_audio)
+
+        z_eeg_in = z_eeg
+        z_audio_in = z_audio
+        if self.bottleneck_dim is not None:
+            z_eeg_in = torch.relu(self.eeg_bottleneck(z_eeg))
+            z_audio_in = torch.relu(self.aud_bottleneck(z_audio))
+
+        e = self.eeg_rms(self.eeg_proj(z_eeg_in))
+        a = self.aud_rms(self.aud_proj(z_audio_in))
+        if self.training and self.feat_drop is not None:
+            e = self.feat_drop(e)
+            a = self.feat_drop(a)
+
+        if self.fusion == 'concat':
+            z = self.concat_proj(torch.cat([e, a], dim=-1))
+        elif self.fusion == 'gating':
+            g = torch.sigmoid(self.gate(torch.cat([e, a], dim=-1)))
+            z = g * e + (1 - g) * a
+        elif self.fusion == 'cross_attn':
+            e_out, a_out, _ = self.cross(e, a, mask)
+            z = (e_out + a_out) / 2
+
+        if hasattr(self, 'ctrl_mlp'):
+            z = z + self.ctrl_mlp(z)
+
+        attn_mask = (mask == 0) if mask is not None else None
+        for layer in self.self_attn_layers:
+            z = layer(z, mask=attn_mask)
+
+        return z
+
+    def forward_per_window(self, z_eeg, z_audio, mask=None):
+        """Return per-window logits for majority voting.
+
+        Args:
+            z_eeg:   [B, K, eeg_dim]
+            z_audio: [B, K, aud_dim]
+            mask:    [B, K] — 1=valid window, 0=padding (or None)
+        Returns:
+            win_logits: [B, K] — logits per window (before pooling)
+        """
+        z = self._encode(z_eeg, z_audio, mask)  # [B, K, hidden]
+        win_logits = self.head(z).squeeze(-1)    # [B, K]
+        if mask is not None:
+            win_logits = win_logits.masked_fill(mask == 0, float('-inf'))
+        return win_logits
+
     def forward(self, z_eeg, z_audio, mask=None, return_window=False):
         """
         Args:
@@ -210,51 +267,22 @@ class CrossModalAttention(nn.Module):
         """
         B = z_eeg.shape[0]
 
-        # 1. Adapter (parameter-efficient fine-tuning on raw backbone features)
-        if hasattr(self, 'eeg_adapter'):
-            z_eeg = self.eeg_adapter(z_eeg)
-        if hasattr(self, 'aud_adapter'):
-            z_audio = self.aud_adapter(z_audio)
-
-        # 2. Optional bottleneck
-        z_eeg_in = z_eeg
-        z_audio_in = z_audio
-        if self.bottleneck_dim is not None:
-            z_eeg_in = torch.relu(self.eeg_bottleneck(z_eeg))
-            z_audio_in = torch.relu(self.aud_bottleneck(z_audio))
-
-        # 3. Project to hidden
-        e = self.eeg_rms(self.eeg_proj(z_eeg_in))
-        a = self.aud_rms(self.aud_proj(z_audio_in))
-        if self.training and self.feat_drop is not None:
-            e = self.feat_drop(e)
-            a = self.feat_drop(a)
-
-        # Window-level auxiliary logits
+        # Window-level auxiliary logits (before fusion, from raw projections)
         win_logits = None
         if return_window and hasattr(self, 'win_cls'):
-            win_logits = self.win_cls(e, a)  # [B*K]
+            z_eeg_in = z_eeg
+            z_audio_in = z_audio
+            if self.bottleneck_dim is not None:
+                z_eeg_in = torch.relu(self.eeg_bottleneck(z_eeg))
+                z_audio_in = torch.relu(self.aud_bottleneck(z_audio))
+            e_aux = self.eeg_rms(self.eeg_proj(z_eeg_in))
+            a_aux = self.aud_rms(self.aud_proj(z_audio_in))
+            win_logits = self.win_cls(e_aux, a_aux)  # [B*K]
 
-        # 4. Fusion
-        if self.fusion == 'concat':
-            z = self.concat_proj(torch.cat([e, a], dim=-1))
-        elif self.fusion == 'gating':
-            g = torch.sigmoid(self.gate(torch.cat([e, a], dim=-1)))
-            z = g * e + (1 - g) * a
-        elif self.fusion == 'cross_attn':
-            e_out, a_out, _ = self.cross(e, a, mask)
-            z = (e_out + a_out) / 2
+        # Shared encoding
+        z = self._encode(z_eeg, z_audio, mask)  # [B, K, hidden]
 
-        # 4. Param-control MLP (if added externally for ablation)
-        if hasattr(self, 'ctrl_mlp'):
-            z = z + self.ctrl_mlp(z)
-
-        # 5. Self-attention over window sequence
-        attn_mask = (mask == 0) if mask is not None else None  # True = masked
-        for layer in self.self_attn_layers:
-            z = layer(z, mask=attn_mask)
-
-        # 6. Pooling
+        # Pooling
         if self.pooling == 'mean':
             if mask is not None:
                 z = (z * mask.unsqueeze(-1)).sum(dim=1) / mask.sum(dim=1, keepdim=True).clamp(min=1)
@@ -265,7 +293,7 @@ class CrossModalAttention(nn.Module):
             z = torch.cat([cls, z], dim=1)
             z = self.pool(z)
 
-        # 7. Classifier
+        # Classifier
         logits = self.head(z).squeeze(-1)
         if return_window:
             return logits, win_logits
