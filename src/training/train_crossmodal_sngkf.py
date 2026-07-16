@@ -535,6 +535,8 @@ def main():
     parser.add_argument('--mixup-alpha', type=float, default=0.0)
     parser.add_argument('--feat-dropout', type=float, default=0.0)
     parser.add_argument('--loocv', action='store_true')
+    parser.add_argument('--outer-folds', type=int, default=N_FOLDS,
+                        help='Number of outer CV folds (default: 5)')
     parser.add_argument('--inner-folds', type=int, default=INNER_FUSION_FOLDS,
                         help='Number of inner CV folds for fusion validation (default: 3)')
     parser.add_argument('--tag', type=str, default=None,
@@ -574,35 +576,9 @@ def run_experiment(seed, args, cv_seed=None):
     except Exception:
         git_commit = 'unknown'
 
-    cfg_name = f'mhcmattention_seed{RANDOM_STATE}_part{cv_seed}_{args.fusion}'
-    cfg_name += f'_h{args.hidden}'
-    if args.n_self_attn_layers > 0:
-        cfg_name += f'_self{args.n_self_attn_layers}L'
-    if args.n_heads != 1:
-        cfg_name += f'_hd{args.n_heads}'
-    if args.bottleneck_dim is not None:
-        cfg_name += f'_bn{args.bottleneck_dim}'
-    if args.pooling == 'cls':
-        cfg_name += '_cls'
-    if args.augment:
-        cfg_name += '_aug'
-    if args.augment_backbone:
-        cfg_name += '_bba'  # backbone augmentation
-    if args.adapter_dim is not None:
-        cfg_name += f'_ad{args.adapter_dim}'
-    if args.window_aux:
-        cfg_name += '_wax'
-    if args.mixup_alpha > 0:
-        cfg_name += f'_mix{args.mixup_alpha}'
-    if args.feat_dropout > 0:
-        cfg_name += f'_fd{args.feat_dropout}'
-    if args.loocv:
-        cfg_name += '_loocv'
-    if args.inner_folds != 3:
-        cfg_name += f'_inf{args.inner_folds}'
-    cfg_name += f'_w{args.max_windows}'
+    cfg_name = f'mhcmattention_sngkf_seed{RANDOM_STATE}_iseed_{cv_seed}_outerf{args.outer_folds}_innerf{args.inner_folds}'
     if args.tag is not None:
-        cfg_name += f'_{args.tag}'
+        cfg_name += f'_tag{args.tag}'
 
     out_dir = os.path.join(OUTPUT_DIR, cfg_name)
     os.makedirs(out_dir, exist_ok=True)
@@ -643,7 +619,7 @@ def run_experiment(seed, args, cv_seed=None):
     if args.loocv:
         splitter = LeaveOneGroupOut()
     else:
-        splitter = StratifiedGroupKFold(n_splits=N_FOLDS, shuffle=True, random_state=cv_seed)
+        splitter = StratifiedGroupKFold(n_splits=args.outer_folds, shuffle=True, random_state=cv_seed)
     fold_results = []
 
     for fi, (tvi, tei) in enumerate(splitter.split(np.zeros(len(pairs)), labels, groups=group_ids)):
