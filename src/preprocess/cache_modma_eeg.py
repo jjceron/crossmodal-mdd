@@ -191,7 +191,7 @@ def main():
         except Exception:
             continue
 
-        raw.filter(0.5, 60, verbose=False)
+        raw.filter(0.5, 40, verbose=False)
         raw.notch_filter(50, verbose=False)
 
         if pick_indices is not None:
