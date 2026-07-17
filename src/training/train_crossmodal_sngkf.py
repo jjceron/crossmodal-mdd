@@ -695,14 +695,12 @@ def run_experiment(seed, args, cv_seed=None):
                 # ── Train clean EEG backbone ──
                 print('    Training clean EEG backbone (inner_vl excluded)...')
                 inner_seed = cv_seed + fi * 10 + inner_fi
-                inner_bb_split = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=inner_seed)
-                eeg_bb_tr_i, eeg_bb_vl_i = next(inner_bb_split.split(
-                    np.zeros(len(eeg_bb_tr_labels)), eeg_bb_tr_labels, groups=eeg_bb_tr_cods))
+                bb_all_i = list(range(len(eeg_bb_tr_labels)))
                 tr_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
-                                      [eeg_bb_tr_i[i] for i in range(len(eeg_bb_tr_i))],
+                                      bb_all_i,
                                       max_windows=args.max_windows, augmenter=bb_eeg_aug, seed=inner_seed)
                 vl_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
-                                      [eeg_bb_vl_i[i] for i in range(len(eeg_bb_vl_i))],
+                                      bb_all_i,
                                       max_windows=args.max_windows, seed=inner_seed)
                 tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True)
                 vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False)
@@ -716,13 +714,12 @@ def run_experiment(seed, args, cv_seed=None):
 
                 # ── Train clean audio backbone ──
                 print('    --- Training clean Audio backbone...')
-                aud_bb_tr_i, aud_bb_vl_i = next(inner_bb_split.split(
-                    np.zeros(len(aud_bb_tr_labels)), aud_bb_tr_labels, groups=aud_bb_tr_cods))
+                bb_all_i = list(range(len(aud_bb_tr_labels)))
                 tr_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
-                                       [aud_bb_tr_i[i] for i in range(len(aud_bb_tr_i))],
+                                       bb_all_i,
                                        max_windows=args.max_windows, augmenter=bb_aud_aug, seed=inner_seed)
                 vl_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
-                                      [aud_bb_vl_i[i] for i in range(len(aud_bb_vl_i))],
+                                      bb_all_i,
                                       max_windows=args.max_windows, seed=inner_seed)
                 tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True)
                 vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False)
@@ -812,15 +809,13 @@ def run_experiment(seed, args, cv_seed=None):
 
             # Train EEG backbone on ALL tr_paired + unpaired
             inner_seed = cv_seed + fi
-            final_bb_split = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=inner_seed)
-            eeg_f_tr_i, eeg_f_vl_i = next(final_bb_split.split(
-                np.zeros(len(eeg_bb_labels)), eeg_bb_labels, groups=eeg_bb_cods))
+            bb_all_i = list(range(len(eeg_bb_labels)))
             tr_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
-                                  [eeg_f_tr_i[i] for i in range(len(eeg_f_tr_i))],
+                                  bb_all_i,
                                   max_windows=args.max_windows, augmenter=bb_eeg_aug, seed=inner_seed)
             vl_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
-                                   [eeg_f_vl_i[i] for i in range(len(eeg_f_vl_i))],
-                                   max_windows=args.max_windows, seed=inner_seed)
+                                  bb_all_i,
+                                  max_windows=args.max_windows, seed=inner_seed)
             tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True)
             vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False)
             eeg_model = DeepConvNetWrapper(64, N_EEG_SAMPLES).to(device)
@@ -831,14 +826,13 @@ def run_experiment(seed, args, cv_seed=None):
             print(f'    EEG backbone best val bacc: {eeg_best_vb:.3f}')
 
             # Train audio backbone on ALL tr_paired + unpaired
-            aud_f_tr_i, aud_f_vl_i = next(final_bb_split.split(
-                np.zeros(len(aud_bb_labels)), aud_bb_labels, groups=aud_bb_cods))
+            bb_all_i = list(range(len(aud_bb_labels)))
             tr_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
-                                  [aud_f_tr_i[i] for i in range(len(aud_f_tr_i))],
+                                  bb_all_i,
                                   max_windows=args.max_windows, augmenter=bb_aud_aug, seed=inner_seed)
             vl_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
-                                   [aud_f_vl_i[i] for i in range(len(aud_f_vl_i))],
-                                   max_windows=args.max_windows, seed=inner_seed)
+                                  bb_all_i,
+                                  max_windows=args.max_windows, seed=inner_seed)
             tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True)
             vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False)
             aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
