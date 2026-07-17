@@ -281,8 +281,8 @@ def train_backbone(model, train_loader, val_loader, args):
             logger.log_epoch(ep, tr_loss, vl_loss, tr_m, vl_m, pat)
         if pat >= args.patience:
             break
-    # last epoch's weights (val_bacc is noisy with small validation set)
-    best_st = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+    if best_st is None:
+        best_st = {k: v.cpu().clone() for k, v in model.state_dict().items()}
     return best_st, best_vb, best_ep, history
 
 # ── Feature extraction ──
