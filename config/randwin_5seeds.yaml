@@ -1,0 +1,127 @@
+# randwinbackbones_linspacefusion — Best pipeline (current)
+# Random windows in backbone (np.random.choice per subject), linspace in fusion
+# BACC = 0.741 ± 0.040  |  AUC = 0.783 ± 0.065  (across 5 seeds)
+# Key difference vs tagmaster: WindowDataset uses np.random.choice instead of np.linspace
+# Commit: f05a462
+# Script: train_crossmodal_sngkf.py
+
+# ── Data ──
+eeg_cache: data/processed/eeg_preprocessed_64ch.npz
+audio_cache: data/processed/audio_mel_cache.npz
+mapping_path: data/processed/multimodal_mapping.json
+cache_suffix: 64ch
+max_windows: 200
+
+# ── Architecture ──
+fusion: cross_attn
+hidden: 64
+n_heads: 1
+dropout: 0.7
+n_self_attn_layers: 1
+self_attn_heads: 4
+self_attn_dropout: 0.1
+pooling: mean
+bottleneck_dim: null
+adapter_dim: null
+feat_dropout: 0.0
+
+# ── Backbone ──
+backbone_eeg: DeepConvNet
+backbone_aud: ShallowConvNet
+backbone_lr: 0.0005
+backbone_wd: 0.005
+backbone_epochs: 200
+backbone_patience: 30
+inner_cv_backbone: 5
+window_selection_backbone: random    # np.random.choice per subject (seed+idx)
+
+# ── Fusion head ──
+fusion_lr: 0.0005
+fusion_wd: 0.001
+fusion_epochs: 200
+fusion_patience: 30
+fusion_scheduler: cosine
+batch_size: 8
+inner_cv_fusion: 5
+window_selection_fusion: linspace    # _select_windows_deterministic
+
+# ── Regularization ──
+augment: true
+augment_backbone: false
+mixup_alpha: 0.0
+window_aux: false
+window_aux_weight: 0.3
+label_smoothing: true
+
+# ── Seeds & CV ──
+seeds: [42, 54, 100, 123, 456]
+cv_type: StratifiedGroupKFold
+outer_folds: 5
+inner_folds: 5
+loocv: false
+
+# ── Exact reproduction command ──
+command: |
+  python -u -m src.training.train_crossmodal_sngkf ^
+    --fusion cross_attn ^
+    --augment ^
+    --dropout 0.7 ^
+    --max-windows 200 ^
+    --inner-folds 5 ^
+    --seed 42 54 100 123 456 ^
+    --tag randwinbackbones_linspacefusion ^
+    --save-model
+
+# ── Results (across 5 seeds) ──
+results:
+  across_seeds:
+    bacc_mean: 0.741
+    bacc_std: 0.040
+    auc_mean: 0.783
+    auc_std: 0.065
+  per_seed:
+    seed_42:
+      test_bacc: 0.758
+      test_bacc_std: 0.085
+      test_auc: 0.751
+      test_auc_std: 0.073
+      inner_cv_val: 0.778
+      folds: [0.875, 0.667, 0.833, 0.667, 0.750]
+    seed_54:
+      test_bacc: 0.742
+      test_bacc_std: 0.135
+      test_auc: 0.850
+      test_auc_std: 0.200
+      inner_cv_val: 0.740
+      folds: [0.667, 0.750, 0.625, 1.000, 0.667]
+    seed_100:
+      test_bacc: 0.692
+      test_bacc_std: 0.213
+      test_auc: 0.711
+      test_auc_std: 0.199
+      inner_cv_val: 0.802
+      folds: [0.833, 0.500, 1.000, 0.417, 0.708]
+    seed_123:
+      test_bacc: 0.708
+      test_bacc_std: 0.129
+      test_auc: 0.733
+      test_auc_std: 0.104
+      inner_cv_val: 0.703
+      folds: [0.500, 0.750, 0.625, 0.833, 0.833]
+    seed_456:
+      test_bacc: 0.805
+      test_bacc_std: 0.125
+      test_auc: 0.871
+      test_auc_std: 0.156
+      inner_cv_val: 0.715
+      folds: [0.900, 0.708, 0.750, 1.000, 0.667]
+
+# ── Analysis ──
+analysis: >
+  Best pipeline so far (BACC=0.741±0.040 across 5 seeds, AUC=0.783±0.065).
+  Random window selection in backbone improves regularization vs tagmaster (0.723).
+  seed 456 (0.805) and seed 42 (0.758) drive the mean; seed 100 (0.692) is lowest
+  due to high variance (fold BACC range 0.417–1.000). Per-subject z-score, object-array
+  cache, random backbone windows, deterministic fusion windows. High variance across
+  folds remains the main challenge (fold BACC range up to 0.583 within a single seed).
+  Next step: hyperparameter search (lr, dropout, max_windows) and/or augment_backbone.
