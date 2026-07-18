@@ -359,8 +359,8 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
     ds_vl = torch.utils.data.TensorDataset(
         torch.FloatTensor(Z_e_vl), torch.FloatTensor(Z_a_vl),
         torch.FloatTensor(mask_vl), torch.FloatTensor(y_vl))
-    tr_ldr = DataLoader(ds_tr, batch_size=args.bs, shuffle=True)
-    vl_ldr = DataLoader(ds_vl, batch_size=args.bs, shuffle=False)
+    tr_ldr = DataLoader(ds_tr, batch_size=args.bs, shuffle=True, num_workers=4, pin_memory=True)
+    vl_ldr = DataLoader(ds_vl, batch_size=args.bs, shuffle=False, num_workers=4, pin_memory=True)
 
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr_fusion,
                             weight_decay=args.wd_fusion, foreach=False)
@@ -702,8 +702,8 @@ def run_experiment(seed, args, cv_seed=None):
                 vl_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
                                       bb_all_i,
                                       max_windows=args.max_windows, seed=inner_seed)
-                tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True)
-                vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False)
+                tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=4, pin_memory=True)
+                vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=4, pin_memory=True)
                 eeg_model = DeepConvNetWrapper(64, N_EEG_SAMPLES).to(device)
                 if fi == 0 and inner_fi == 0:
                     print(f'    EEG params: {sum(p.numel() for p in eeg_model.parameters()):,}')
@@ -721,8 +721,8 @@ def run_experiment(seed, args, cv_seed=None):
                 vl_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
                                       bb_all_i,
                                       max_windows=args.max_windows, seed=inner_seed)
-                tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True)
-                vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False)
+                tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=4, pin_memory=True)
+                vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=4, pin_memory=True)
                 aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
                 if fi == 0 and inner_fi == 0:
                     print(f'    Audio params: {sum(p.numel() for p in aud_model.parameters()):,}')
@@ -816,8 +816,8 @@ def run_experiment(seed, args, cv_seed=None):
             vl_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
                                   bb_all_i,
                                   max_windows=args.max_windows, seed=inner_seed)
-            tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True)
-            vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False)
+            tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=4, pin_memory=True)
+            vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=4, pin_memory=True)
             eeg_model = DeepConvNetWrapper(64, N_EEG_SAMPLES).to(device)
             eeg_best_st, eeg_best_vb, _, eeg_history = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
             eeg_model.load_state_dict(eeg_best_st)
@@ -833,8 +833,8 @@ def run_experiment(seed, args, cv_seed=None):
             vl_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
                                   bb_all_i,
                                   max_windows=args.max_windows, seed=inner_seed)
-            tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True)
-            vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False)
+            tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=4, pin_memory=True)
+            vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=4, pin_memory=True)
             aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
             aud_best_st, aud_best_vb, _, aud_history = train_backbone(aud_model, tr_ldr, vl_ldr, args)
             aud_model.load_state_dict(aud_best_st)
@@ -882,7 +882,7 @@ def run_experiment(seed, args, cv_seed=None):
             ds_all = torch.utils.data.TensorDataset(
                 torch.FloatTensor(Z_e_tr), torch.FloatTensor(Z_a_tr),
                 torch.FloatTensor(mask_tr), torch.FloatTensor(y_tr))
-            ld_all = DataLoader(ds_all, batch_size=args.bs, shuffle=True)
+            ld_all = DataLoader(ds_all, batch_size=args.bs, shuffle=True, num_workers=4, pin_memory=True)
 
             opt = torch.optim.AdamW(fusion_model.parameters(), lr=args.lr_fusion,
                                     weight_decay=args.wd_fusion, foreach=False)
