@@ -24,13 +24,11 @@ FIGURES_ROOT = 'outputs/figures'
 METRIC_KEYS = {'bacc': 'val_bacc', 'acc': 'val_acc', 'f1': 'val_f1',
                'sens': 'val_sens', 'spec': 'val_spec'}
 
-TYPE_MAP = {
-    'classical_dl': 'classical_dl',
-    'classical_ml': 'classical_ml',
-    'ocampnet':     'ocampnet',
-    'crossmodal_strict': 'crossmodal',
-    'crossmodal_nested': 'crossmodal_nested',
-}
+def _available_types():
+    if not os.path.isdir(RESULTS_ROOT):
+        return []
+    return sorted([d for d in os.listdir(RESULTS_ROOT)
+                   if os.path.isdir(os.path.join(RESULTS_ROOT, d))])
 
 
 def _load_curves(benchmark, model, channels, suffix='ch'):
@@ -179,13 +177,71 @@ def _plot_roc_pair(fig, axes, fold_entry, fold_num, show_legend=False):
         ax_r.set_title(f'Fold {fold_num} — ROC', fontsize=10)
 
 
+def _resolve_model(results_root, bench_type, model_arg):
+    """Resolve model name: use --model if given, else auto-detect if exactly one subfolder."""
+    if model_arg:
+        return model_arg
+    models_dir = os.path.join(results_root, bench_type)
+    if not os.path.isdir(models_dir):
+        return None
+    candidates = sorted([d for d in os.listdir(models_dir)
+                         if os.path.isdir(os.path.join(models_dir, d))])
+    if len(candidates) == 0:
+        return None
+    if len(candidates) == 1:
+        print(f'  Auto-detected model: {candidates[0]}')
+        return candidates[0]
+    print(f'ERROR: multiple models found in {models_dir}/. Use --model to specify one:')
+    for c in candidates:
+        print(f'  {c}')
+    sys.exit(1)
+
+
+def _detect_type_and_load(args):
+    """Detect structure (nested vs classical) and load data. Returns (folds_data, hist_key, out_dir)."""
+    nested_path = os.path.join(RESULTS_ROOT, args.type, args.model, 'results.json')
+    if os.path.exists(nested_path):
+        # Nested structure: <type>/<model>/results.json
+        results = json.load(open(nested_path))
+        out_dir = os.path.join(FIGURES_ROOT, args.type, args.model)
+        os.makedirs(out_dir, exist_ok=True)
+        subtype = args.subtype or 'fusion'
+        hist_key = {'eeg': 'eeg_history', 'aud': 'aud_history', 'fusion': 'fusion_history'}[subtype]
+        folds_data = results['folds']
+        for fe in folds_data:
+            if hist_key not in fe or not fe[hist_key]:
+                print(f'  Fold {fe.get("fold","?")}: no {hist_key} saved (re-run with updated script)')
+        return folds_data, hist_key, out_dir, results
+    # Classical structure: <type>/<modality>/<model>_<channels>ch.json
+    suffix = 'mel' if args.modality == 'audio' else 'ch'
+    benchmark = f'{args.type}/{args.modality}'
+    curves_path = os.path.join(RESULTS_ROOT, benchmark,
+                               f'{args.model}_{args.channels}{suffix}_curves.json')
+    results_path = os.path.join(RESULTS_ROOT, benchmark,
+                                f'{args.model}_{args.channels}{suffix}.json')
+    curves = json.load(open(curves_path)) if os.path.exists(curves_path) else None
+    results = json.load(open(results_path)) if os.path.exists(results_path) else None
+    if curves is None and results is None:
+        print(f'ERROR: no files found for {args.model}_{args.channels}{suffix}')
+        sys.exit(1)
+    folds_data = _merge_folds(curves, results)
+    out_dir = os.path.join(FIGURES_ROOT, benchmark, f'{args.model}_{args.channels}{suffix}')
+    os.makedirs(out_dir, exist_ok=True)
+    return folds_data, 'history', out_dir, results
+
+
 def main():
+    avail_types = _available_types()
+    if not avail_types:
+        print(f'ERROR: no type directories found under {RESULTS_ROOT}/')
+        sys.exit(1)
+
     parser = argparse.ArgumentParser(description='Plot training diagnostics')
     parser.add_argument('--type', type=str, required=True,
-                        choices=list(TYPE_MAP.keys()),
-                        help='Experiment type: classical_dl, classical_ml, ocampnet, crossmodal_strict, crossmodal_nested')
-    parser.add_argument('--model', type=str, required=True,
-                        help='Model key (e.g. deepconvnet)')
+                        choices=avail_types,
+                        help=f'Experiment type. Available: {avail_types}')
+    parser.add_argument('--model', type=str, default=None,
+                        help='Model subfolder/key. Auto-detected if exactly one exists.')
     parser.add_argument('--channels', type=int, default=64,
                         help='Feature count (channels for EEG, mels for audio)')
     parser.add_argument('--modality', type=str, default='eeg', choices=['eeg', 'audio'],
@@ -205,44 +261,11 @@ def main():
                         help='Save PNG instead of displaying')
     parser.add_argument('--subtype', type=str, default=None,
                         choices=['eeg', 'aud', 'fusion'],
-                        help='For crossmodal_strict/nested: which history to plot (eeg, aud, fusion)')
+                        help='History to plot: eeg, aud, fusion (nested structure only)')
     args = parser.parse_args()
+    args.model = _resolve_model(RESULTS_ROOT, args.type, args.model)
 
-    is_strict = args.type in ('crossmodal_strict', 'crossmodal_nested')
-
-    if is_strict:
-        bench = TYPE_MAP[args.type]
-        results_path = os.path.join(RESULTS_ROOT, bench, args.model, 'results.json')
-        results = json.load(open(results_path)) if os.path.exists(results_path) else None
-        curves = None
-        if results is None:
-            print(f'ERROR: no results at {results_path}')
-            sys.exit(1)
-        out_dir = os.path.join(FIGURES_ROOT, bench, args.model)
-        os.makedirs(out_dir, exist_ok=True)
-        subtype = args.subtype or 'fusion'
-        hist_key = {'eeg': 'eeg_history', 'aud': 'aud_history', 'fusion': 'fusion_history'}[subtype]
-        folds_data = results['folds']
-        # Validate history exists
-        for fe in folds_data:
-            if hist_key not in fe or not fe[hist_key]:
-                print(f'  Fold {fe.get("fold","?")}: no {hist_key} saved (re-run with updated script)')
-    else:
-        benchmark = f'{TYPE_MAP[args.type]}/{args.modality}'
-        suffix = 'mel' if args.modality == 'audio' else 'ch'
-        curves_path = os.path.join(RESULTS_ROOT, benchmark,
-                                   f'{args.model}_{args.channels}{suffix}_curves.json')
-        results_path = os.path.join(RESULTS_ROOT, benchmark,
-                                     f'{args.model}_{args.channels}{suffix}.json')
-        curves = json.load(open(curves_path)) if os.path.exists(curves_path) else None
-        results = json.load(open(results_path)) if os.path.exists(results_path) else None
-        if curves is None and results is None:
-            print(f'ERROR: no files found for {args.model}_{args.channels}ch')
-            sys.exit(1)
-        out_dir = os.path.join(FIGURES_ROOT, benchmark, f'{args.model}_{args.channels}{suffix}')
-        os.makedirs(out_dir, exist_ok=True)
-        folds_data = _merge_folds(curves, results)
-        hist_key = 'history'
+    folds_data, hist_key, out_dir, results = _detect_type_and_load(args)
 
     # ── Confusion matrix ───────────────────────────────────────────────
     if args.cm:
