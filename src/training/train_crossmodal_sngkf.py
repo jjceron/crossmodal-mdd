@@ -35,7 +35,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from sklearn.model_selection import StratifiedGroupKFold, LeaveOneGroupOut
+from sklearn.model_selection import StratifiedGroupKFold, LeaveOneGroupOut, StratifiedShuffleSplit
 from sklearn.metrics import balanced_accuracy_score, confusion_matrix, roc_auc_score
 
 from datetime import datetime
@@ -697,12 +697,15 @@ def run_experiment(seed, args, cv_seed=None):
                 # ── Train clean EEG backbone ──
                 print('    Training clean EEG backbone (inner_vl excluded)...')
                 inner_seed = cv_seed + fi * 10 + inner_fi
-                bb_all_i = list(range(len(eeg_bb_tr_labels)))
+                n_bb = len(eeg_bb_tr_labels)
+                bb_vl_size = max(2, min(3, n_bb // 5))
+                sss = StratifiedShuffleSplit(n_splits=1, test_size=bb_vl_size, random_state=inner_seed + 999)
+                bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), eeg_bb_tr_labels))
                 tr_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
-                                      bb_all_i,
+                                      bb_tr_i,
                                       max_windows=args.max_windows, augmenter=bb_eeg_aug, seed=inner_seed)
                 vl_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
-                                      bb_all_i,
+                                      bb_vl_i,
                                       max_windows=args.max_windows, seed=inner_seed)
                 tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
@@ -716,12 +719,15 @@ def run_experiment(seed, args, cv_seed=None):
 
                 # ── Train clean audio backbone ──
                 print('    --- Training clean Audio backbone...')
-                bb_all_i = list(range(len(aud_bb_tr_labels)))
+                n_bb = len(aud_bb_tr_labels)
+                bb_vl_size = max(2, min(3, n_bb // 5))
+                sss = StratifiedShuffleSplit(n_splits=1, test_size=bb_vl_size, random_state=inner_seed + 999)
+                bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), aud_bb_tr_labels))
                 tr_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
-                                       bb_all_i,
+                                       bb_tr_i,
                                        max_windows=args.max_windows, augmenter=bb_aud_aug, seed=inner_seed)
                 vl_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
-                                      bb_all_i,
+                                      bb_vl_i,
                                       max_windows=args.max_windows, seed=inner_seed)
                 tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
@@ -811,12 +817,15 @@ def run_experiment(seed, args, cv_seed=None):
 
             # Train EEG backbone on ALL tr_paired + unpaired
             inner_seed = cv_seed + fi
-            bb_all_i = list(range(len(eeg_bb_labels)))
+            n_bb = len(eeg_bb_labels)
+            bb_vl_size = max(2, min(3, n_bb // 5))
+            sss = StratifiedShuffleSplit(n_splits=1, test_size=bb_vl_size, random_state=inner_seed + 999)
+            bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), eeg_bb_labels))
             tr_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
-                                  bb_all_i,
+                                  bb_tr_i,
                                   max_windows=args.max_windows, augmenter=bb_eeg_aug, seed=inner_seed)
             vl_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
-                                  bb_all_i,
+                                  bb_vl_i,
                                   max_windows=args.max_windows, seed=inner_seed)
             tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
             vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
@@ -828,12 +837,15 @@ def run_experiment(seed, args, cv_seed=None):
             print(f'    EEG backbone best val bacc: {eeg_best_vb:.3f}')
 
             # Train audio backbone on ALL tr_paired + unpaired
-            bb_all_i = list(range(len(aud_bb_labels)))
+            n_bb = len(aud_bb_labels)
+            bb_vl_size = max(2, min(3, n_bb // 5))
+            sss = StratifiedShuffleSplit(n_splits=1, test_size=bb_vl_size, random_state=inner_seed + 999)
+            bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), aud_bb_labels))
             tr_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
-                                  bb_all_i,
+                                  bb_tr_i,
                                   max_windows=args.max_windows, augmenter=bb_aud_aug, seed=inner_seed)
             vl_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
-                                  bb_all_i,
+                                  bb_vl_i,
                                   max_windows=args.max_windows, seed=inner_seed)
             tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
             vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
