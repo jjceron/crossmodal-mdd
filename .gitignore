@@ -21,7 +21,7 @@ cache/
 outputs/
 
 # Temporary files
-tmp/
+tmp/ 
 
 # Documentation: only *.md at root level; exclude tex/ subfolder
 docs/
