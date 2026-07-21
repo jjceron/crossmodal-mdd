@@ -232,13 +232,12 @@ def _compute_epoch_metrics(model, loader, crit):
 
 def train_backbone(model, train_loader, val_loader, args):
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd, foreach=False)
-    sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min', factor=0.5, patience=5)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
     crit = nn.BCEWithLogitsLoss()
-    best_loss, best_st, pat, best_ep = float('inf'), None, 0, 0
     logger = ClassificationLogger()
     logger.log_header()
     history = {k: [] for k in ('train_loss', 'val_loss', 'train_acc', 'val_acc',
-                                'val_bacc', 'val_f1', 'val_sens', 'val_spec')}
+                                'val_bacc', 'val_f1', 'val_sens', 'val_spec', 'lr')}
     for ep in range(1, args.epochs + 1):
         model.train()
         tr_loss, tr_n = 0.0, 0
@@ -263,7 +262,8 @@ def train_backbone(model, train_loader, val_loader, args):
         tr_true = torch.cat(tr_labels).cpu().numpy()
         tr_m = logger.metrics(tr_true, tr_pred)
         vl_loss, vl_m = _compute_epoch_metrics(model, val_loader, crit)
-        sched.step(vl_loss)
+        current_lr = sched.get_last_lr()[0]
+        sched.step()
 
         history['train_loss'].append(float(tr_loss))
         history['val_loss'].append(float(vl_loss))
@@ -271,21 +271,14 @@ def train_backbone(model, train_loader, val_loader, args):
         history['val_acc'].append(vl_m['acc'])
         for k in ('bacc', 'f1', 'sens', 'spec'):
             history[f'val_{k}'].append(vl_m[k])
+        history['lr'].append(float(current_lr))
 
-        if vl_loss < best_loss:
-            best_loss = vl_loss
-            best_st = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-            best_ep = ep
-            pat = 0
-        else:
-            pat += 1
-        if ep == 1 or pat == 0 or ep % 10 == 0:
-            logger.log_epoch(ep, tr_loss, vl_loss, tr_m, vl_m, pat)
-        if pat >= args.patience:
-            break
-    if best_st is None:
-        best_st = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-    return best_st, best_loss, best_ep, history
+        if ep == 1 or ep % 10 == 0:
+            logger.log_epoch(ep, tr_loss, vl_loss, tr_m, vl_m, 0)
+
+    final_st = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+    final_vl = float(vl_loss)
+    return final_st, final_vl, args.epochs, history
 
 # ── Feature extraction ──
 
@@ -698,7 +691,7 @@ def run_experiment(seed, args, cv_seed=None):
                 print('    Training clean EEG backbone (inner_vl excluded)...')
                 inner_seed = cv_seed + fi * 10 + inner_fi
                 n_bb = len(eeg_bb_tr_labels)
-                bb_vl_size = max(2, min(3, n_bb // 5))
+                bb_vl_size = 6
                 sss = StratifiedShuffleSplit(n_splits=1, test_size=bb_vl_size, random_state=inner_seed + 999)
                 bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), eeg_bb_tr_labels))
                 tr_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
@@ -720,7 +713,7 @@ def run_experiment(seed, args, cv_seed=None):
                 # ── Train clean audio backbone ──
                 print('    --- Training clean Audio backbone...')
                 n_bb = len(aud_bb_tr_labels)
-                bb_vl_size = max(2, min(3, n_bb // 5))
+                bb_vl_size = 6
                 sss = StratifiedShuffleSplit(n_splits=1, test_size=bb_vl_size, random_state=inner_seed + 999)
                 bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), aud_bb_tr_labels))
                 tr_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
@@ -818,7 +811,7 @@ def run_experiment(seed, args, cv_seed=None):
             # Train EEG backbone on ALL tr_paired + unpaired
             inner_seed = cv_seed + fi
             n_bb = len(eeg_bb_labels)
-            bb_vl_size = max(2, min(3, n_bb // 5))
+            bb_vl_size = 6
             sss = StratifiedShuffleSplit(n_splits=1, test_size=bb_vl_size, random_state=inner_seed + 999)
             bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), eeg_bb_labels))
             tr_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
@@ -834,11 +827,11 @@ def run_experiment(seed, args, cv_seed=None):
             eeg_model.load_state_dict(eeg_best_st)
             eeg_model.eval()
             del tr_ds, vl_ds, tr_ldr, vl_ldr
-            print(f'    EEG backbone best val loss: {eeg_best_loss:.4f}')
+            print(f'    EEG backbone final val loss: {eeg_best_loss:.4f}')
 
             # Train audio backbone on ALL tr_paired + unpaired
             n_bb = len(aud_bb_labels)
-            bb_vl_size = max(2, min(3, n_bb // 5))
+            bb_vl_size = 6
             sss = StratifiedShuffleSplit(n_splits=1, test_size=bb_vl_size, random_state=inner_seed + 999)
             bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), aud_bb_labels))
             tr_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
@@ -854,7 +847,7 @@ def run_experiment(seed, args, cv_seed=None):
             aud_model.load_state_dict(aud_best_st)
             aud_model.eval()
             del tr_ds, vl_ds, tr_ldr, vl_ldr
-            print(f'    Audio backbone best val loss: {aud_best_loss:.4f}')
+            print(f'    Audio backbone final val loss: {aud_best_loss:.4f}')
 
             # Extract features from ALL tr_paired (final)
             eeg_aug = None
