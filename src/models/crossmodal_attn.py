@@ -227,7 +227,7 @@ class CrossModalAttention(nn.Module):
             g = torch.sigmoid(self.gate(torch.cat([e, a], dim=-1)))
             z = g * e + (1 - g) * a
         elif self.fusion == 'cross_attn':
-            e_out, a_out, _ = self.cross(e, a, mask)
+            e_out, a_out, self._attn_weights = self.cross(e, a, mask)
             z = (e_out + a_out) / 2
 
         if hasattr(self, 'ctrl_mlp'):
