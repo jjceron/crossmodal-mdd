@@ -5,11 +5,16 @@ Usage:
   python -m src.interpretability.aggregate --tag bbvalfix_d07_lr5e4_6seeds
   python -m src.interpretability.aggregate --tag bbvalfix_d07_lr5e4_6seeds --save
 """
-import os, sys, glob, json, csv, argparse
+import os
+import sys
+import glob
+import json
+import csv
+import argparse
 import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from interpretability.base import RESULTS_ROOT, FIGURES_ROOT
+from interpretability.base import RESULTS_ROOT
 
 
 def find_experiment_dirs(tag):
@@ -86,7 +91,7 @@ def main():
               f"{fmt_val(row['test_auc'], '>6.3f'):>6s} | "
               f"{row['test_acc']:>6.3f} | {row['test_f1']:>6.3f} | "
               f"{row['test_sens']:>6.3f} | {row['test_spec']:>6.3f} | "
-              f"{row['inner_cv_val_bacc']:>8.3f} | "
+              f"{fmt_val(row['inner_cv_val_bacc'], '>8.3f'):>8s} | "
               f"{fmt_val(row['eeg_backbone_val_loss'], '>8.4f'):>8s} | "
               f"{fmt_val(row['aud_backbone_val_loss'], '>8.4f'):>8s}")
 

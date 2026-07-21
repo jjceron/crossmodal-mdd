@@ -7,7 +7,9 @@ windows drive the final subject-level prediction most.
 Usage:
   python -m src.interpretability.analyze_windows --tag bbvalfix_d07_lr5e4_6seeds --seed 42 --fold 1 --save
 """
-import os, sys, json
+import os
+import sys
+import json
 import numpy as np
 import torch
 import matplotlib
@@ -19,7 +21,7 @@ from interpretability.base import (
     load_eeg_cache, load_audio_cache, load_mapping,
     build_paired_subjects, build_models, load_checkpoint,
     find_checkpoint_dir, encode_eeg, encode_audio,
-    device, RESULTS_ROOT, FIGURES_ROOT, parse_shared_args
+    device, FIGURES_ROOT, parse_shared_args
 )
 
 
@@ -47,7 +49,6 @@ def main():
 
     test_indices = [i for i, (eid, _, _) in enumerate(pairs) if eid in test_subj_ids]
     sub_pairs = [pairs[i] for i in test_indices]
-    test_labels = np.array([p[2] for p in sub_pairs])
     print(f'  Test subjects: {len(test_indices)}')
 
     # For each test subject, get per-window logits

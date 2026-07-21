@@ -4,7 +4,9 @@ Ablation: compare fusion vs EEG-only vs Audio-only on test subjects.
 Usage:
   python -m src.interpretability.analyze_ablation --tag bbvalfix_d07_lr5e4_6seeds --seed 42 --fold 1 --save
 """
-import os, sys, json
+import os
+import sys
+import json
 import numpy as np
 import torch
 import matplotlib
@@ -16,7 +18,7 @@ from interpretability.base import (
     load_eeg_cache, load_audio_cache, load_mapping,
     build_paired_subjects, build_models, load_checkpoint,
     find_checkpoint_dir, extract_all_features,
-    device, RESULTS_ROOT, FIGURES_ROOT, parse_shared_args
+    device, FIGURES_ROOT, parse_shared_args
 )
 from sklearn.metrics import balanced_accuracy_score, roc_auc_score, f1_score
 

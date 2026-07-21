@@ -1,4 +1,8 @@
-import os, sys, glob, json, argparse
+import os
+import sys
+import glob
+import json
+import argparse
 import numpy as np
 import torch
 import torch.nn as nn
@@ -144,7 +148,6 @@ def build_paired_subjects(eeg_data, eeg_labels, eeg_cods,
         eeg_subjs[cod] = {'label': int(eeg_labels[i]), 'windows': eeg_data[i]}
         aid = rev.get(cod)
         if aid in aud_cods:
-            j = list(aud_cods).index(aid)
             pairs.append([cod, aid, int(eeg_labels[i])])
     for i, cod in enumerate(aud_cods):
         aud_subjs[cod] = {'label': int(aud_labels[i]), 'windows': aud_data[i]}
@@ -155,7 +158,8 @@ def get_feature_dims():
     aud_dummy = torch.randn(1, 64, 200).to(device)
     eeg_m = DeepConvNetWrapper(64, 500).to(device)
     aud_m = ShallowConvNetWrapper(64, 200).to(device)
-    eeg_m.eval(); aud_m.eval()
+    eeg_m.eval()
+    aud_m.eval()
     with torch.no_grad():
         eeg_dim = eeg_m.forward_features(eeg_dummy).shape[1]
         aud_dim = aud_m.forward_features(aud_dummy).shape[1]
