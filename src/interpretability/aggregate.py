@@ -28,9 +28,12 @@ def find_experiment_dirs(tag):
 
 def parse_seed_from_dir(dirname):
     parts = os.path.basename(dirname).split('_')
-    for i, p in enumerate(parts):
-        if p == 'seed' and i + 1 < len(parts):
-            return int(parts[i + 1])
+    for p in parts:
+        if p.startswith('seed'):
+            try:
+                return int(p[4:])
+            except ValueError:
+                continue
     return None
 
 
@@ -105,9 +108,10 @@ def main():
     seed_summaries = []
     for s in seeds:
         s_rows = [r for r in all_rows if r['seed'] == s]
-        baccs = [r['test_bacc'] for r in s_rows]
+        baccs = [r['test_bacc'] for r in s_rows if isinstance(r['test_bacc'], (int, float))]
         aucs = [r['test_auc'] for r in s_rows if isinstance(r['test_auc'], (int, float))]
-        print(f"  seed {s:>4d}: bacc={np.mean(baccs):.3f}±{np.std(baccs):.3f}  "
+        print(f"  seed {fmt_val(s, '>4d'):>4s}: "
+              f"bacc={np.mean(baccs):.3f}±{np.std(baccs):.3f}  "
               f"auc={np.mean(aucs):.3f}±{np.std(aucs):.3f}  "
               f"n_folds={len(s_rows)}")
         seed_summaries.append({
@@ -119,7 +123,7 @@ def main():
         })
 
     # Global aggregate
-    all_baccs = [r['test_bacc'] for r in all_rows]
+    all_baccs = [r['test_bacc'] for r in all_rows if isinstance(r['test_bacc'], (int, float))]
     all_aucs = [r['test_auc'] for r in all_rows if isinstance(r['test_auc'], (int, float))]
     print(f'\n  GLOBAL: bacc={np.mean(all_baccs):.3f}±{np.std(all_baccs):.3f}  '
           f'auc={np.mean(all_aucs):.3f}±{np.std(all_aucs):.3f}  '
