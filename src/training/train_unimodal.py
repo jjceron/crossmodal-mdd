@@ -195,21 +195,21 @@ def evaluate(model, loader):
             all_subjs.extend(s)
     logits = torch.cat(all_logits)
     labels = torch.cat(all_labels).numpy()
-    probs = torch.sigmoid(logits).numpy()
-    preds = (probs >= 0.5).astype(int)
-    return labels, preds, probs.squeeze(), all_subjs
+    return labels, logits.numpy().squeeze(), all_subjs
 
-def subject_majority_vote(subjs, probs, labels):
+def subject_fusion_vote(subjs, logits, labels):
+    """Mean-pool logits per subject (feature pooling), then sigmoid + threshold."""
     unique = sorted(set(subjs))
     y_true, y_pred, y_prob = [], [], []
     for s in unique:
         mask = [i for i, ss in enumerate(subjs) if ss == s]
-        s_probs = np.array([probs[i] for i in mask])
+        s_logits = np.array([logits[i] for i in mask])
         s_labels = labels[mask[0]]
-        vote = int((s_probs >= 0.5).mean() >= 0.5)
+        mean_logit = s_logits.mean()
+        prob = float(1.0 / (1.0 + np.exp(-mean_logit)))
         y_true.append(s_labels)
-        y_pred.append(vote)
-        y_prob.append(float(s_probs.mean()))
+        y_pred.append(int(prob >= 0.5))
+        y_prob.append(prob)
     return np.array(y_true), np.array(y_pred), np.array(y_prob)
 
 # ── Main ──
@@ -347,9 +347,8 @@ def run_seed(seed, args, is_eeg):
                                   max_windows=args.max_windows, seed=seed + fi * 10 + inner_fi)
             vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
 
-            yt_vl, yp_vl, pr_vl, subjs_vl = evaluate(model, vl_ldr)
-            # Subject-level majority vote
-            yt_vl_s, yp_vl_s, _ = subject_majority_vote(subjs_vl, pr_vl, yt_vl)
+            yt_vl, lg_vl, subjs_vl = evaluate(model, vl_ldr)
+            yt_vl_s, yp_vl_s, _ = subject_fusion_vote(subjs_vl, lg_vl, yt_vl)
             inner_bacc = balanced_accuracy_score(yt_vl_s, yp_vl_s)
             print(f'    >>> Inner fold {inner_fi + 1} val_bacc={inner_bacc:.3f}')
 
@@ -393,8 +392,8 @@ def run_seed(seed, args, is_eeg):
                               max_windows=args.max_windows, seed=seed + fi)
         te_ldr = DataLoader(te_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
 
-        y_true, y_pred, y_prob, subjs_test = evaluate(model, te_ldr)
-        y_true_s, y_pred_s, y_prob_s = subject_majority_vote(subjs_test, y_prob, y_true)
+        y_true, lg_te, subjs_test = evaluate(model, te_ldr)
+        y_true_s, y_pred_s, y_prob_s = subject_fusion_vote(subjs_test, lg_te, y_true)
 
         bacc = balanced_accuracy_score(y_true_s, y_pred_s)
         roc_auc = float(roc_auc_score(y_true_s, y_prob_s if len(np.unique(y_true_s)) > 1 else y_true_s))
