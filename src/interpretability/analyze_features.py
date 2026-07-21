@@ -62,7 +62,7 @@ def main():
     tsne = TSNE(n_components=2, random_state=42, perplexity=min(30, len(pairs) - 1))
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 5.5))
-    titles = ['EEG backbone features', 'Audio backbone features', 'EEG + Audio (concat)']
+    titles = ['EEG backbone features', 'Audio backbone features', 'EEG + Audio']
     feats_list = [feats_eeg, feats_aud, feats_cat]
     colors = ['#e74c3c', '#3498db']
     markers = ['o', 's']
