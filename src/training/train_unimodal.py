@@ -201,7 +201,7 @@ def evaluate(model, loader):
 
 def subject_majority_vote(subjs, probs, labels):
     unique = sorted(set(subjs))
-    y_true, y_pred = [], []
+    y_true, y_pred, y_prob = [], [], []
     for s in unique:
         mask = [i for i, ss in enumerate(subjs) if ss == s]
         s_probs = np.array([probs[i] for i in mask])
@@ -209,7 +209,8 @@ def subject_majority_vote(subjs, probs, labels):
         vote = int((s_probs >= 0.5).mean() >= 0.5)
         y_true.append(s_labels)
         y_pred.append(vote)
-    return np.array(y_true), np.array(y_pred)
+        y_prob.append(float(s_probs.mean()))
+    return np.array(y_true), np.array(y_pred), np.array(y_prob)
 
 # ── Main ──
 
@@ -348,7 +349,7 @@ def run_seed(seed, args, is_eeg):
 
             yt_vl, yp_vl, pr_vl, subjs_vl = evaluate(model, vl_ldr)
             # Subject-level majority vote
-            yt_vl_s, yp_vl_s = subject_majority_vote(subjs_vl, pr_vl, yt_vl)
+            yt_vl_s, yp_vl_s, _ = subject_majority_vote(subjs_vl, pr_vl, yt_vl)
             inner_bacc = balanced_accuracy_score(yt_vl_s, yp_vl_s)
             print(f'    >>> Inner fold {inner_fi + 1} val_bacc={inner_bacc:.3f}')
 
@@ -393,10 +394,10 @@ def run_seed(seed, args, is_eeg):
         te_ldr = DataLoader(te_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
 
         y_true, y_pred, y_prob, subjs_test = evaluate(model, te_ldr)
-        y_true_s, y_pred_s = subject_majority_vote(subjs_test, y_prob, y_true)
+        y_true_s, y_pred_s, y_prob_s = subject_majority_vote(subjs_test, y_prob, y_true)
 
         bacc = balanced_accuracy_score(y_true_s, y_pred_s)
-        roc_auc = float(roc_auc_score(y_true_s, y_prob if len(np.unique(y_true_s)) > 1 else y_true_s))
+        roc_auc = float(roc_auc_score(y_true_s, y_prob_s if len(np.unique(y_true_s)) > 1 else y_true_s))
         cm = confusion_matrix(y_true_s, y_pred_s).tolist()
 
         logger = ClassificationLogger()
