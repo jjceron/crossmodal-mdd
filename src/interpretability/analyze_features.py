@@ -8,7 +8,6 @@ import os
 import sys
 import numpy as np
 import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 from sklearn.metrics import silhouette_score
@@ -30,6 +29,8 @@ def compute_silhouette(feats_2d, labels):
 
 def main():
     args = parse_shared_args('t-SNE feature visualization')
+    if args.save:
+        matplotlib.use('Agg')
 
     # Load data
     print('Loading data...')

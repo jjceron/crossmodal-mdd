@@ -10,7 +10,6 @@ import json
 import numpy as np
 import torch
 import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -24,6 +23,8 @@ from interpretability.base import (
 
 def main():
     args = parse_shared_args('Cross-attention weight visualization')
+    if args.save:
+        matplotlib.use('Agg')
 
     # Load data
     print('Loading data...')

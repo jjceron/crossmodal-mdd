@@ -59,20 +59,21 @@ def main():
 
         folds = results.get('folds', [])
         for fold_data in folds:
+            tm = fold_data.get('test_metrics', {})
             row = {
                 'seed': seed,
-                'fold': fold_data['fold'],
-                'test_bacc': fold_data['test_bacc'],
-                'test_auc': fold_data.get('test_auc', ''),
-                'test_acc': fold_data['test_metrics']['acc'],
-                'test_f1': fold_data['test_metrics']['f1'],
-                'test_sens': fold_data['test_metrics']['sens'],
-                'test_spec': fold_data['test_metrics']['spec'],
-                'inner_cv_val_bacc': fold_data['inner_cv_val_bacc'],
-                'eeg_backbone_val_loss': fold_data.get('eeg_backbone_val_loss', ''),
-                'aud_backbone_val_loss': fold_data.get('aud_backbone_val_loss', ''),
-                'n_test': fold_data.get('n_test', ''),
-                'final_fusion_epochs': fold_data.get('final_fusion_epochs', ''),
+                'fold': fold_data.get('fold'),
+                'test_bacc': fold_data.get('test_bacc'),
+                'test_auc': fold_data.get('test_auc'),
+                'test_acc': tm.get('acc'),
+                'test_f1': tm.get('f1'),
+                'test_sens': tm.get('sens'),
+                'test_spec': tm.get('spec'),
+                'inner_cv_val_bacc': fold_data.get('inner_cv_val_bacc'),
+                'eeg_backbone_val_loss': fold_data.get('eeg_backbone_val_loss'),
+                'aud_backbone_val_loss': fold_data.get('aud_backbone_val_loss'),
+                'n_test': fold_data.get('n_test'),
+                'final_fusion_epochs': fold_data.get('final_fusion_epochs'),
             }
             all_rows.append(row)
 
@@ -87,10 +88,13 @@ def main():
     print(f"{'seed':>4s} | {'fold':>4s} | {'bacc':>6s} | {'auc':>6s} | {'acc':>6s} | {'f1':>6s} | {'sens':>6s} | {'spec':>6s} | {'inner_vl':>8s} | {'eeg_bb':>8s} | {'aud_bb':>8s}")
     print('-' * 90)
     for row in all_rows:
-        print(f"{row['seed']:>4d} | {row['fold']:>4d} | {row['test_bacc']:>6.3f} | "
+        print(f"{fmt_val(row['seed'], '>4d'):>4s} | {fmt_val(row['fold'], '>4d'):>4s} | "
+              f"{fmt_val(row['test_bacc'], '>6.3f'):>6s} | "
               f"{fmt_val(row['test_auc'], '>6.3f'):>6s} | "
-              f"{row['test_acc']:>6.3f} | {row['test_f1']:>6.3f} | "
-              f"{row['test_sens']:>6.3f} | {row['test_spec']:>6.3f} | "
+              f"{fmt_val(row['test_acc'], '>6.3f'):>6s} | "
+              f"{fmt_val(row['test_f1'], '>6.3f'):>6s} | "
+              f"{fmt_val(row['test_sens'], '>6.3f'):>6s} | "
+              f"{fmt_val(row['test_spec'], '>6.3f'):>6s} | "
               f"{fmt_val(row['inner_cv_val_bacc'], '>8.3f'):>8s} | "
               f"{fmt_val(row['eeg_backbone_val_loss'], '>8.4f'):>8s} | "
               f"{fmt_val(row['aud_backbone_val_loss'], '>8.4f'):>8s}")

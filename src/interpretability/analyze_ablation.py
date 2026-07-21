@@ -10,7 +10,6 @@ import json
 import numpy as np
 import torch
 import matplotlib
-matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -38,6 +37,8 @@ def evaluate(fusion_model, Z_e, Z_a, masks, labels):
 
 def main():
     args = parse_shared_args('Modality ablation study')
+    if args.save:
+        matplotlib.use('Agg')
 
     # Load data
     print('Loading data...')
