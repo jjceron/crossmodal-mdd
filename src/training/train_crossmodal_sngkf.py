@@ -530,7 +530,7 @@ def main():
     parser.add_argument('--max-windows', type=int, default=50)
     parser.add_argument('--lr', type=float, default=5e-4)
     parser.add_argument('--wd', type=float, default=5e-3)
-    parser.add_argument('--epochs', type=int, default=200)
+    parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--patience', type=int, default=30)
     parser.add_argument('--lr-fusion', type=float, default=5e-4)
     parser.add_argument('--wd-fusion', type=float, default=1e-3)
