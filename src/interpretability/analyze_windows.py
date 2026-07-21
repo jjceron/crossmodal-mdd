@@ -3,11 +3,13 @@ Per-window prediction importance analysis: box plots + class density.
 
 Usage:
   python -m src.interpretability.analyze_windows --tag bbvalfix_d07_lr5e4_6seeds --seed 42 --fold 1
+  python -m src.interpretability.analyze_windows --tag bbvalfix_d07_lr5e4_6seeds --seed 42 --global
   python -m src.interpretability.analyze_windows --tag bbvalfix_d07_lr5e4_6seeds --seed 42 --fold 1 --save
 """
 import os
 import sys
 import json
+import argparse
 import numpy as np
 import torch
 import matplotlib
@@ -18,41 +20,20 @@ from interpretability.base import (
     load_eeg_cache, load_audio_cache, load_mapping,
     build_paired_subjects, build_models, load_checkpoint,
     find_checkpoint_dir, encode_eeg, encode_audio,
-    device, FIGURES_ROOT, parse_shared_args
+    device, FIGURES_ROOT
 )
 
 
-def main():
-    args = parse_shared_args('Per-window importance analysis')
-    if args.save:
-        matplotlib.use('Agg')
-
-    # Load data
-    print('Loading data...')
-    (eeg_data, eeg_labels, eeg_cods), (aud_data, aud_labels, aud_cods), mapping = \
-        load_eeg_cache(), load_audio_cache(), load_mapping()
-    pairs, eeg_subjs, aud_subjs = build_paired_subjects(
-        eeg_data, eeg_labels, eeg_cods, aud_data, aud_labels, aud_cods, mapping)
-
-    print(f'Loading checkpoint seed={args.seed} fold={args.fold}...')
-    ckpt = load_checkpoint(args.tag, args.seed, args.fold)
-    eeg_model, aud_model, fusion_model = build_models(ckpt)
-
-    ckpt_dir = find_checkpoint_dir(args.tag, args.seed)
+def _get_fold_subjects(tag, seed):
+    ckpt_dir = find_checkpoint_dir(tag, seed)
     with open(os.path.join(ckpt_dir, 'results.json')) as f:
         results = json.load(f)
-    fold_data = results['folds'][args.fold - 1]
-    test_subj_ids = fold_data['test_subjects']
+    return [(fd['fold'], fd['test_subjects']) for fd in results['folds']]
 
-    test_indices = [i for i, (eid, _, _) in enumerate(pairs) if eid in test_subj_ids]
-    sub_pairs = [pairs[i] for i in test_indices]
-    print(f'  Test subjects: {len(test_indices)}')
 
-    # Per-window logits for each test subject
+def _get_window_logits(eeg_model, aud_model, fusion_model, sub_pairs, eeg_subjs, aud_subjs):
     all_logits = []
     all_labels = []
-    subj_names = []
-
     for eid, aid, label in sub_pairs:
         we = eeg_subjs[eid]['windows'].copy()
         wa = aud_subjs[aid]['windows'].copy()
@@ -73,15 +54,17 @@ def main():
         logits = win_logits.squeeze(0).cpu().numpy()
         all_logits.append(logits)
         all_labels.append(label)
-        subj_names.append(eid)
+    return all_logits, all_labels
 
-    # ── Figure: boxplots + density ──
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
+
+def _plot(all_logits, all_labels, title_suffix):
     colors = ['#3498db', '#e74c3c']
+    n_subj = len(all_logits)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
 
     # Panel 1: Box plot per subject
     ax = axes[0]
-    n_subj = len(subj_names)
     positions = np.arange(n_subj)
     bp = ax.boxplot(all_logits, positions=positions, widths=0.5, patch_artist=True,
                      showfliers=False)
@@ -90,18 +73,16 @@ def main():
         patch.set_facecolor(colors[label])
         patch.set_alpha(0.7)
 
-    # Color the background by class
     for i in range(n_subj):
         ax.axvspan(i - 0.5, i + 0.5, facecolor=colors[all_labels[i]], alpha=0.08)
 
     ax.axhline(0, color='gray', linestyle='--', linewidth=0.8, alpha=0.6)
     ax.set_xticks(positions)
-    ax.set_xticklabels([f'S{i+1}' for i in range(n_subj)], fontsize=8)
+    ax.set_xticklabels([f'S{i+1}' for i in range(n_subj)], fontsize=7, rotation=45)
     ax.set_xlabel('Subject', fontsize=10)
     ax.set_ylabel('Window logit', fontsize=10)
     ax.set_title('Per-subject window logit distribution', fontsize=11)
 
-    # Add legend patches for class colors
     from matplotlib.patches import Patch
     legend_elements = [Patch(facecolor=colors[0], alpha=0.7, label='HC'),
                        Patch(facecolor=colors[1], alpha=0.7, label='MDD')]
@@ -126,14 +107,78 @@ def main():
     ax.set_title('Window logit distribution by class', fontsize=11)
     ax.legend(fontsize=9)
 
-    plt.suptitle(f'Per-window analysis | seed={args.seed} fold={args.fold}', fontsize=12)
+    plt.suptitle(f'Per-window analysis | {title_suffix}', fontsize=12)
     plt.tight_layout()
+    return fig
+
+
+def main():
+    p = argparse.ArgumentParser(description='Per-window importance analysis')
+    p.add_argument('--tag', required=True, help='Experiment tag')
+    p.add_argument('--seed', type=int, default=42, help='Seed')
+    p.add_argument('--fold', type=int, default=1, help='Fold (ignored if --global)')
+    p.add_argument('--global_', action='store_true', dest='global_',
+                   help='Aggregate across all folds')
+    p.add_argument('--save', action='store_true', help='Save figure')
+    args = p.parse_args()
+    if args.save:
+        matplotlib.use('Agg')
+
+    print('Loading data...')
+    (eeg_data, eeg_labels, eeg_cods), (aud_data, aud_labels, aud_cods), mapping = \
+        load_eeg_cache(), load_audio_cache(), load_mapping()
+    pairs, eeg_subjs, aud_subjs = build_paired_subjects(
+        eeg_data, eeg_labels, eeg_cods, aud_data, aud_labels, aud_cods, mapping)
+
+    all_logits = []
+    all_labels = []
+
+    if args.global_:
+        fold_subjs = _get_fold_subjects(args.tag, args.seed)
+        for fi, test_subj_ids in fold_subjs:
+            test_indices = [i for i, (eid, _, _) in enumerate(pairs) if eid in test_subj_ids]
+            if not test_indices:
+                continue
+            sub_pairs = [pairs[i] for i in test_indices]
+            labels = [p[2] for p in sub_pairs]
+            print(f'  Fold {fi}: {len(test_indices)} subjects')
+
+            ckpt = load_checkpoint(args.tag, args.seed, fi)
+            eeg_model, aud_model, fusion_model = build_models(ckpt)
+
+            logits, _ = _get_window_logits(eeg_model, aud_model, fusion_model,
+                                           sub_pairs, eeg_subjs, aud_subjs)
+            all_logits.extend(logits)
+            all_labels.extend(labels)
+
+        title_suffix = f'seed={args.seed} global ({len(all_logits)} subj)'
+    else:
+        fi = args.fold
+        ckpt_dir = find_checkpoint_dir(args.tag, args.seed)
+        with open(os.path.join(ckpt_dir, 'results.json')) as f:
+            results = json.load(f)
+        test_subj_ids = results['folds'][fi - 1]['test_subjects']
+
+        test_indices = [i for i, (eid, _, _) in enumerate(pairs) if eid in test_subj_ids]
+        sub_pairs = [pairs[i] for i in test_indices]
+        labels = [p[2] for p in sub_pairs]
+        print(f'  Fold {fi}: {len(test_indices)} subjects')
+
+        ckpt = load_checkpoint(args.tag, args.seed, fi)
+        eeg_model, aud_model, fusion_model = build_models(ckpt)
+
+        all_logits, all_labels = _get_window_logits(eeg_model, aud_model, fusion_model,
+                                                     sub_pairs, eeg_subjs, aud_subjs)
+        title_suffix = f'seed={args.seed} fold={fi}'
+
+    fig = _plot(all_logits, all_labels, title_suffix)
 
     if args.save:
         out_dir = os.path.join(FIGURES_ROOT, 'windows', f'{args.tag}')
         os.makedirs(out_dir, exist_ok=True)
-        path = os.path.join(out_dir, f'seed{args.seed}_fold{args.fold}.png')
-        plt.savefig(path, dpi=150, bbox_inches='tight')
+        mode = 'global' if args.global_ else f'fold{args.fold}'
+        path = os.path.join(out_dir, f'seed{args.seed}_{mode}.png')
+        fig.savefig(path, dpi=150, bbox_inches='tight')
         print(f'Saved: {path}')
     else:
         plt.show()
