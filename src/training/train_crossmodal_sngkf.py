@@ -232,9 +232,9 @@ def _compute_epoch_metrics(model, loader, crit):
 
 def train_backbone(model, train_loader, val_loader, args):
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd, foreach=False)
-    sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='max', factor=0.5, patience=5)
+    sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min', factor=0.5, patience=5)
     crit = nn.BCEWithLogitsLoss()
-    best_vb, best_st, pat, best_ep = -1.0, None, 0, 0
+    best_loss, best_st, pat, best_ep = float('inf'), None, 0, 0
     logger = ClassificationLogger()
     logger.log_header()
     history = {k: [] for k in ('train_loss', 'val_loss', 'train_acc', 'val_acc',
@@ -263,7 +263,7 @@ def train_backbone(model, train_loader, val_loader, args):
         tr_true = torch.cat(tr_labels).cpu().numpy()
         tr_m = logger.metrics(tr_true, tr_pred)
         vl_loss, vl_m = _compute_epoch_metrics(model, val_loader, crit)
-        sched.step(vl_m['bacc'])
+        sched.step(vl_loss)
 
         history['train_loss'].append(float(tr_loss))
         history['val_loss'].append(float(vl_loss))
@@ -272,8 +272,8 @@ def train_backbone(model, train_loader, val_loader, args):
         for k in ('bacc', 'f1', 'sens', 'spec'):
             history[f'val_{k}'].append(vl_m[k])
 
-        if vl_m['bacc'] > best_vb:
-            best_vb = vl_m['bacc']
+        if vl_loss < best_loss:
+            best_loss = vl_loss
             best_st = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             best_ep = ep
             pat = 0
@@ -285,7 +285,7 @@ def train_backbone(model, train_loader, val_loader, args):
             break
     if best_st is None:
         best_st = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-    return best_st, best_vb, best_ep, history
+    return best_st, best_loss, best_ep, history
 
 # ── Feature extraction ──
 
@@ -712,7 +712,7 @@ def run_experiment(seed, args, cv_seed=None):
                 eeg_model = DeepConvNetWrapper(64, N_EEG_SAMPLES).to(device)
                 if fi == 0 and inner_fi == 0:
                     print(f'    EEG params: {sum(p.numel() for p in eeg_model.parameters()):,}')
-                eeg_best_st, eeg_best_vb, _, _ = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
+                eeg_best_st, eeg_best_loss, _, _ = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
                 eeg_model.load_state_dict(eeg_best_st)
                 eeg_model.eval()
                 del tr_ds, vl_ds, tr_ldr, vl_ldr
@@ -734,7 +734,7 @@ def run_experiment(seed, args, cv_seed=None):
                 aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
                 if fi == 0 and inner_fi == 0:
                     print(f'    Audio params: {sum(p.numel() for p in aud_model.parameters()):,}')
-                aud_best_st, aud_best_vb, _, _ = train_backbone(aud_model, tr_ldr, vl_ldr, args)
+                aud_best_st, aud_best_loss, _, _ = train_backbone(aud_model, tr_ldr, vl_ldr, args)
                 aud_model.load_state_dict(aud_best_st)
                 aud_model.eval()
                 del tr_ds, vl_ds, tr_ldr, vl_ldr
@@ -830,11 +830,11 @@ def run_experiment(seed, args, cv_seed=None):
             tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
             vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
             eeg_model = DeepConvNetWrapper(64, N_EEG_SAMPLES).to(device)
-            eeg_best_st, eeg_best_vb, _, eeg_history = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
+            eeg_best_st, eeg_best_loss, _, eeg_history = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
             eeg_model.load_state_dict(eeg_best_st)
             eeg_model.eval()
             del tr_ds, vl_ds, tr_ldr, vl_ldr
-            print(f'    EEG backbone best val bacc: {eeg_best_vb:.3f}')
+            print(f'    EEG backbone best val loss: {eeg_best_loss:.4f}')
 
             # Train audio backbone on ALL tr_paired + unpaired
             n_bb = len(aud_bb_labels)
@@ -850,11 +850,11 @@ def run_experiment(seed, args, cv_seed=None):
             tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
             vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
             aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
-            aud_best_st, aud_best_vb, _, aud_history = train_backbone(aud_model, tr_ldr, vl_ldr, args)
+            aud_best_st, aud_best_loss, _, aud_history = train_backbone(aud_model, tr_ldr, vl_ldr, args)
             aud_model.load_state_dict(aud_best_st)
             aud_model.eval()
             del tr_ds, vl_ds, tr_ldr, vl_ldr
-            print(f'    Audio backbone best val bacc: {aud_best_vb:.3f}')
+            print(f'    Audio backbone best val loss: {aud_best_loss:.4f}')
 
             # Extract features from ALL tr_paired (final)
             eeg_aug = None
@@ -970,8 +970,8 @@ def run_experiment(seed, args, cv_seed=None):
                 'final_fusion_epochs': final_fusion_epochs,
                 'inner_folds_val_baccs': [float(v) for v in inner_best_vbs],
                 'inner_folds_best_epochs': [int(e) for e in inner_best_eps],
-                'eeg_backbone_val_bacc': float(eeg_best_vb),
-                'aud_backbone_val_bacc': float(aud_best_vb),
+                'eeg_backbone_val_loss': float(eeg_best_loss),
+                'aud_backbone_val_loss': float(aud_best_loss),
                 'test_metrics': fm,
                 'test_bacc': float(bacc),
                 'test_acc': float(fm['acc']),
