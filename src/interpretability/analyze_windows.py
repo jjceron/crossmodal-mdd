@@ -1,10 +1,8 @@
 """
-Per-window prediction importance analysis.
-
-Uses forward_per_window() to get logits per window, identifies which
-windows drive the final subject-level prediction most.
+Per-window prediction importance analysis: box plots + class density.
 
 Usage:
+  python -m src.interpretability.analyze_windows --tag bbvalfix_d07_lr5e4_6seeds --seed 42 --fold 1
   python -m src.interpretability.analyze_windows --tag bbvalfix_d07_lr5e4_6seeds --seed 42 --fold 1 --save
 """
 import os
@@ -36,12 +34,10 @@ def main():
     pairs, eeg_subjs, aud_subjs = build_paired_subjects(
         eeg_data, eeg_labels, eeg_cods, aud_data, aud_labels, aud_cods, mapping)
 
-    # Load checkpoint
     print(f'Loading checkpoint seed={args.seed} fold={args.fold}...')
     ckpt = load_checkpoint(args.tag, args.seed, args.fold)
     eeg_model, aud_model, fusion_model = build_models(ckpt)
 
-    # Find test subjects
     ckpt_dir = find_checkpoint_dir(args.tag, args.seed)
     with open(os.path.join(ckpt_dir, 'results.json')) as f:
         results = json.load(f)
@@ -52,63 +48,85 @@ def main():
     sub_pairs = [pairs[i] for i in test_indices]
     print(f'  Test subjects: {len(test_indices)}')
 
-    # For each test subject, get per-window logits
-    all_win_logits = []
-    n_windows_list = []
+    # Per-window logits for each test subject
+    all_logits = []
+    all_labels = []
+    subj_names = []
 
     for eid, aid, label in sub_pairs:
         we = eeg_subjs[eid]['windows'].copy()
         wa = aud_subjs[aid]['windows'].copy()
-
         K = min(len(we), len(wa))
         we, wa = we[:K], wa[:K]
-
-        # Z-score per subject
         we = (we - we.mean()) / (we.std() + 1e-8)
         wa = (wa - wa.mean()) / (wa.std() + 1e-8)
 
-        # Encode to features
         ze = encode_eeg(eeg_model, we)
         za = encode_audio(aud_model, wa)
 
-        # Add batch dim and convert to tensors
         t_e = torch.FloatTensor(ze).unsqueeze(0).to(device)
         t_a = torch.FloatTensor(za).unsqueeze(0).to(device)
 
         with torch.no_grad():
-            win_logits = fusion_model.forward_per_window(t_e, t_a)  # [1, K]
-        all_win_logits.append(win_logits.squeeze(0).cpu().numpy())
-        n_windows_list.append(K)
+            win_logits = fusion_model.forward_per_window(t_e, t_a)
 
-    # Plot: per-subject window importance distributions
-    n_subj = len(sub_pairs)
-    fig, axes = plt.subplots(1, n_subj, figsize=(5 * n_subj, 4))
-    if n_subj == 1:
-        axes = [axes]
+        logits = win_logits.squeeze(0).cpu().numpy()
+        all_logits.append(logits)
+        all_labels.append(label)
+        subj_names.append(eid)
 
-    for idx in range(n_subj):
-        eid, aid, label = sub_pairs[idx]
-        scores = all_win_logits[idx]
-        K = n_windows_list[idx]
+    # ── Figure: boxplots + density ──
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5))
+    colors = ['#3498db', '#e74c3c']
 
-        ax = axes[idx]
-        ax.bar(range(K), scores, color='#3498db' if label == 0 else '#e74c3c', alpha=0.7)
-        ax.axhline(0, color='gray', linestyle='-', linewidth=0.5)
-        ax.set_title(f'{eid} ({"MDD" if label else "HC"})', fontsize=10)
-        ax.set_xlabel('Window index')
-        ax.set_ylabel('Logit')
-        ax.set_xlim(-0.5, K - 0.5)
+    # Panel 1: Box plot per subject
+    ax = axes[0]
+    n_subj = len(subj_names)
+    positions = np.arange(n_subj)
+    bp = ax.boxplot(all_logits, positions=positions, widths=0.5, patch_artist=True,
+                     showfliers=False)
 
-        # Top-3 most MDD-like windows
-        top_mdd = np.argsort(scores)[-3:][::-1]
-        top_hc = np.argsort(scores)[:3]
-        ax.scatter(top_mdd, scores[top_mdd], color='darkred', s=30, zorder=5, label='Top MDD')
-        ax.scatter(top_hc, scores[top_hc], color='darkblue', s=30, zorder=5, label='Top HC')
+    for patch, label in zip(bp['boxes'], all_labels):
+        patch.set_facecolor(colors[label])
+        patch.set_alpha(0.7)
 
-        if idx == 0:
-            ax.legend(fontsize=7)
+    # Color the background by class
+    for i in range(n_subj):
+        ax.axvspan(i - 0.5, i + 0.5, facecolor=colors[all_labels[i]], alpha=0.08)
 
-    plt.suptitle(f'Per-window logits | seed={args.seed} fold={args.fold}', fontsize=14)
+    ax.axhline(0, color='gray', linestyle='--', linewidth=0.8, alpha=0.6)
+    ax.set_xticks(positions)
+    ax.set_xticklabels([f'S{i+1}' for i in range(n_subj)], fontsize=8)
+    ax.set_xlabel('Subject', fontsize=10)
+    ax.set_ylabel('Window logit', fontsize=10)
+    ax.set_title('Per-subject window logit distribution', fontsize=11)
+
+    # Add legend patches for class colors
+    from matplotlib.patches import Patch
+    legend_elements = [Patch(facecolor=colors[0], alpha=0.7, label='HC'),
+                       Patch(facecolor=colors[1], alpha=0.7, label='MDD')]
+    ax.legend(handles=legend_elements, fontsize=9)
+
+    # Panel 2: Density by class
+    ax = axes[1]
+    mdd_logits = np.concatenate([logits for logits, lbl in zip(all_logits, all_labels) if lbl == 1])
+    hc_logits = np.concatenate([logits for logits, lbl in zip(all_logits, all_labels) if lbl == 0])
+
+    bins = np.linspace(-3, 3, 40)
+    if len(hc_logits) > 0:
+        ax.hist(hc_logits, bins=bins, density=True, alpha=0.5, color=colors[0],
+                label=f'HC (n={len(hc_logits)} wins)', edgecolor='white', linewidth=0.3)
+    if len(mdd_logits) > 0:
+        ax.hist(mdd_logits, bins=bins, density=True, alpha=0.5, color=colors[1],
+                label=f'MDD (n={len(mdd_logits)} wins)', edgecolor='white', linewidth=0.3)
+
+    ax.axvline(0, color='gray', linestyle='--', linewidth=0.8, alpha=0.6)
+    ax.set_xlabel('Logit', fontsize=10)
+    ax.set_ylabel('Density', fontsize=10)
+    ax.set_title('Window logit distribution by class', fontsize=11)
+    ax.legend(fontsize=9)
+
+    plt.suptitle(f'Per-window analysis | seed={args.seed} fold={args.fold}', fontsize=12)
     plt.tight_layout()
 
     if args.save:
