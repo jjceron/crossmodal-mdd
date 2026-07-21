@@ -105,8 +105,9 @@ def plot_eeg_signal(
     ax.set_xlabel("Samples", fontsize=9)
     ax.set_ylabel("Amplitude", fontsize=9)
     ax.tick_params(labelsize=7)
-    ax.legend(fontsize=5, ncol=min(4, n_ch), loc="upper right",
-              frameon=False)
+    if not kwargs.get('no_legend', False):
+        ax.legend(fontsize=5, ncol=min(4, n_ch), loc="upper right",
+                  frameon=False)
     if hide_axis:
         ax.set_axis_off()
     plt.tight_layout()
@@ -220,7 +221,8 @@ def plot_audio_wavelike(
         ax.plot(t, spec[b] + b * offset, linewidth=0.5, label=f"band {b}")
     _setup_ax(ax, hide_axis, xlabel="Time frames", ylabel="Amplitude (offset)")
     ax.set_yticks([])
-    ax.legend(fontsize=6, loc="upper right", ncol=2)
+    if not kwargs.get('no_legend', False):
+        ax.legend(fontsize=6, loc="upper right", ncol=2)
     if hide_axis:
         ax.set_axis_off()
     plt.tight_layout()
@@ -308,6 +310,8 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="Remove all axes / ticks.")
     p.add_argument("--no-colorbar", action="store_true",
                     help="Omit colour bar.")
+    p.add_argument("--no-legend", action="store_true",
+                    help="Omit legend.")
     p.add_argument("--cmap", type=str, default="viridis",
                     help="Matplotlib colormap (default: viridis).")
     p.add_argument(
@@ -359,7 +363,7 @@ def main():
 
     # ── Dispatch ──
     kw = dict(hide_axis=args.hide_axis, no_colorbar=args.no_colorbar,
-              cmap=args.cmap)
+              no_legend=args.no_legend, cmap=args.cmap)
 
     if args.modality == "both":
         fig = plot_both(eeg_windows, audio_windows, args.subject, args.window,
