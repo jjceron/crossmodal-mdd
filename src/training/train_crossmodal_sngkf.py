@@ -364,7 +364,7 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
     n_hc = len(y_tr) - n_mdd
     pos_weight = torch.tensor([n_hc / max(n_mdd, 1)]).to(device)
     crit = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-    best_vb, best_st, pat, best_ep = -1.0, None, 0, 0
+    best_vl, best_st, pat, best_ep = float('inf'), None, 0, 0
     logger = ClassificationLogger()
     logger.log_header()
     history = {k: [] for k in ('train_loss', 'val_loss', 'train_acc', 'val_acc',
@@ -428,8 +428,8 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
         for k in ('bacc', 'f1', 'sens', 'spec'):
             history[f'val_{k}'].append(vl_m[k])
 
-        if vl_m['bacc'] > best_vb:
-            best_vb = vl_m['bacc']
+        if vl_loss < best_vl:
+            best_vl = vl_loss
             best_st = copy.deepcopy(model.state_dict())
             best_ep = ep
             pat = 0
@@ -444,7 +444,7 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
 
     if best_st is not None:
         model.load_state_dict(best_st)
-    return model, best_vb, best_ep, history
+    return model, best_vl, best_ep, history
 
 # ── Mixup ──
 
@@ -534,7 +534,7 @@ def main():
     parser.add_argument('--patience', type=int, default=30)
     parser.add_argument('--lr-fusion', type=float, default=5e-4)
     parser.add_argument('--wd-fusion', type=float, default=1e-3)
-    parser.add_argument('--fusion-epochs', type=int, default=200)
+    parser.add_argument('--fusion-epochs', type=int, default=150)
     parser.add_argument('--fusion-patience', type=int, default=30)
     parser.add_argument('--bs', type=int, default=8)
     parser.add_argument('--augment', action='store_true')
@@ -550,7 +550,7 @@ def main():
     parser.add_argument('--window-aux', action='store_true')
     parser.add_argument('--window-aux-weight', type=float, default=0.3)
     parser.add_argument('--mixup-alpha', type=float, default=0.0)
-    parser.add_argument('--feat-dropout', type=float, default=0.0)
+    parser.add_argument('--feat-dropout', type=float, default=0.2)
     parser.add_argument('--cache-suffix', type=str, default='64ch',
                         help='EEG cache suffix (e.g. 64ch, 64ch_ica, 19ch, ftsm32)')
     parser.add_argument('--loocv', action='store_true')
@@ -691,46 +691,33 @@ def run_experiment(seed, args, cv_seed=None):
                 print('    Training clean EEG backbone (inner_vl excluded)...')
                 inner_seed = cv_seed + fi * 10 + inner_fi
                 n_bb = len(eeg_bb_tr_labels)
-                bb_vl_size = 4
-                sss = StratifiedShuffleSplit(n_splits=1, test_size=bb_vl_size, random_state=inner_seed + 999)
-                bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), eeg_bb_tr_labels))
+                n_bb_ch = eeg_bb_tr_data[0].shape[1]
                 tr_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
-                                      bb_tr_i,
+                                      list(range(n_bb)),
                                       max_windows=args.max_windows, augmenter=bb_eeg_aug, seed=inner_seed)
-                vl_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
-                                      bb_vl_i,
-                                      max_windows=args.max_windows, seed=inner_seed)
                 tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
-                vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
-                eeg_model = DeepConvNetWrapper(64, N_EEG_SAMPLES).to(device)
+                eeg_model = DeepConvNetWrapper(n_bb_ch, N_EEG_SAMPLES).to(device)
                 if fi == 0 and inner_fi == 0:
                     print(f'    EEG params: {sum(p.numel() for p in eeg_model.parameters()):,}')
-                eeg_best_st, eeg_best_loss, _, _ = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
+                eeg_best_st, eeg_best_loss, _, _ = train_backbone(eeg_model, tr_ldr, tr_ldr, args)
                 eeg_model.load_state_dict(eeg_best_st)
                 eeg_model.eval()
-                del tr_ds, vl_ds, tr_ldr, vl_ldr
+                del tr_ds, tr_ldr
 
                 # ── Train clean audio backbone ──
                 print('    --- Training clean Audio backbone...')
                 n_bb = len(aud_bb_tr_labels)
-                bb_vl_size = 4
-                sss = StratifiedShuffleSplit(n_splits=1, test_size=bb_vl_size, random_state=inner_seed + 999)
-                bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), aud_bb_tr_labels))
                 tr_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
-                                       bb_tr_i,
+                                       list(range(n_bb)),
                                        max_windows=args.max_windows, augmenter=bb_aud_aug, seed=inner_seed)
-                vl_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
-                                      bb_vl_i,
-                                      max_windows=args.max_windows, seed=inner_seed)
                 tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
-                vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
                 if fi == 0 and inner_fi == 0:
                     print(f'    Audio params: {sum(p.numel() for p in aud_model.parameters()):,}')
-                aud_best_st, aud_best_loss, _, _ = train_backbone(aud_model, tr_ldr, vl_ldr, args)
+                aud_best_st, aud_best_loss, _, _ = train_backbone(aud_model, tr_ldr, tr_ldr, args)
                 aud_model.load_state_dict(aud_best_st)
                 aud_model.eval()
-                del tr_ds, vl_ds, tr_ldr, vl_ldr
+                del tr_ds, tr_ldr
 
                 # ── Extract features with CLEAN backbones ──
                 eeg_aug = EEGAugment(noise_std=args.noise_std,
@@ -811,43 +798,30 @@ def run_experiment(seed, args, cv_seed=None):
             # Train EEG backbone on ALL tr_paired + unpaired
             inner_seed = cv_seed + fi
             n_bb = len(eeg_bb_labels)
-            bb_vl_size = 4
-            sss = StratifiedShuffleSplit(n_splits=1, test_size=bb_vl_size, random_state=inner_seed + 999)
-            bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), eeg_bb_labels))
+            n_bb_ch = eeg_bb_data[0].shape[1]
             tr_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
-                                  bb_tr_i,
+                                  list(range(n_bb)),
                                   max_windows=args.max_windows, augmenter=bb_eeg_aug, seed=inner_seed)
-            vl_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
-                                  bb_vl_i,
-                                  max_windows=args.max_windows, seed=inner_seed)
             tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
-            vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
-            eeg_model = DeepConvNetWrapper(64, N_EEG_SAMPLES).to(device)
-            eeg_best_st, eeg_best_loss, _, eeg_history = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
+            eeg_model = DeepConvNetWrapper(n_bb_ch, N_EEG_SAMPLES).to(device)
+            eeg_best_st, eeg_best_loss, _, eeg_history = train_backbone(eeg_model, tr_ldr, tr_ldr, args)
             eeg_model.load_state_dict(eeg_best_st)
             eeg_model.eval()
-            del tr_ds, vl_ds, tr_ldr, vl_ldr
-            print(f'    EEG backbone final val loss: {eeg_best_loss:.4f}')
+            del tr_ds, tr_ldr
+            print(f'    EEG backbone final train loss: {eeg_best_loss:.4f}')
 
             # Train audio backbone on ALL tr_paired + unpaired
             n_bb = len(aud_bb_labels)
-            bb_vl_size = 4
-            sss = StratifiedShuffleSplit(n_splits=1, test_size=bb_vl_size, random_state=inner_seed + 999)
-            bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), aud_bb_labels))
             tr_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
-                                  bb_tr_i,
+                                  list(range(n_bb)),
                                   max_windows=args.max_windows, augmenter=bb_aud_aug, seed=inner_seed)
-            vl_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
-                                  bb_vl_i,
-                                  max_windows=args.max_windows, seed=inner_seed)
             tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
-            vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
             aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
-            aud_best_st, aud_best_loss, _, aud_history = train_backbone(aud_model, tr_ldr, vl_ldr, args)
+            aud_best_st, aud_best_loss, _, aud_history = train_backbone(aud_model, tr_ldr, tr_ldr, args)
             aud_model.load_state_dict(aud_best_st)
             aud_model.eval()
-            del tr_ds, vl_ds, tr_ldr, vl_ldr
-            print(f'    Audio backbone final val loss: {aud_best_loss:.4f}')
+            del tr_ds, tr_ldr
+            print(f'    Audio backbone final train loss: {aud_best_loss:.4f}')
 
             # Extract features from ALL tr_paired (final)
             eeg_aug = None
