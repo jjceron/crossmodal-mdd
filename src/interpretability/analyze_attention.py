@@ -152,8 +152,7 @@ def main():
         print(f'Saved: {path1}')
         print(f'Saved: {path2}')
     else:
-        fig1.show()
-        fig2.show()
+        plt.show()
 
 
 if __name__ == '__main__':
