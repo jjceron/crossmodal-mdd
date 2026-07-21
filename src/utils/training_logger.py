@@ -26,8 +26,6 @@ class ClassificationLogger:
     def metrics(self, true, pred):
         """Compute classification metrics dict."""
         t, p = np.array(true, dtype=int), np.array(pred, dtype=int)
-        if not _check_binary(t, p):
-            return {k: 0.0 for k in _KEYS_CLAS}
         tp = int(((p == 1) & (t == 1)).sum())
         tn = int(((p == 0) & (t == 0)).sum())
         fp = int(((p == 1) & (t == 0)).sum())
