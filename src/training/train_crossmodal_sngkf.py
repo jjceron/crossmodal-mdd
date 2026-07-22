@@ -58,7 +58,9 @@ MAPPING_PATH = 'data/processed/multimodal_mapping.json'
 OUTPUT_DIR = 'outputs/results/crossmodal_nested'
 RANDOM_STATE = 42
 N_FOLDS = 5
-INNER_FUSION_FOLDS = 4
+INNER_FUSION_FOLDS = 10
+BB_PATIENCE = 40
+BB_EPOCHS = 300
 N_MELS = 64
 N_AUDIO_SAMPLES = 200
 N_EEG_SAMPLES = 500
@@ -212,10 +214,11 @@ def _compute_epoch_metrics(model, loader, crit):
 
 def train_backbone(model, train_loader, val_loader, args):
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd, foreach=False)
-    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
+    sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='max', factor=0.5, patience=10)
     crit = nn.BCEWithLogitsLoss()
     logger = ClassificationLogger()
     logger.log_header()
+    best_vb, best_st, best_ep, pat = 0.0, None, 0, 0
     history = {k: [] for k in ('train_loss', 'val_loss', 'train_acc', 'val_acc',
                                 'val_bacc', 'val_f1', 'val_sens', 'val_spec', 'lr')}
     for ep in range(1, args.epochs + 1):
@@ -242,8 +245,8 @@ def train_backbone(model, train_loader, val_loader, args):
         tr_true = torch.cat(tr_labels).cpu().numpy()
         tr_m = logger.metrics(tr_true, tr_pred)
         vl_loss, vl_m = _compute_epoch_metrics(model, val_loader, crit)
-        current_lr = sched.get_last_lr()[0]
-        sched.step()
+        sched.step(vl_m['bacc'])
+        current_lr = opt.param_groups[0]['lr']
 
         history['train_loss'].append(float(tr_loss))
         history['val_loss'].append(float(vl_loss))
@@ -253,12 +256,23 @@ def train_backbone(model, train_loader, val_loader, args):
             history[f'val_{k}'].append(vl_m[k])
         history['lr'].append(float(current_lr))
 
-        if ep == 1 or ep % 10 == 0:
-            logger.log_epoch(ep, tr_loss, vl_loss, tr_m, vl_m, 0)
+        if vl_m['bacc'] > best_vb:
+            best_vb = vl_m['bacc']
+            best_st = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            best_ep = ep
+            pat = 0
+        else:
+            pat += 1
 
-    final_st = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-    final_vl = float(vl_loss)
-    return final_st, final_vl, args.epochs, history
+        if ep == 1 or pat == 0 or ep % 10 == 0:
+            logger.log_epoch(ep, tr_loss, vl_loss, tr_m, vl_m, pat)
+
+        if pat >= args.bb_patience:
+            break
+
+    if best_st is not None:
+        model.load_state_dict(best_st)
+    return best_st, best_vb, best_ep, history
 
 # ── Feature extraction ──
 
@@ -493,18 +507,19 @@ def main():
     parser.add_argument('--n-self-attn-layers', type=int, default=1)
     parser.add_argument('--self-attn-heads', type=int, default=4)
     parser.add_argument('--self-attn-dropout', type=float, default=0.1)
-    parser.add_argument('--hidden', type=int, default=64)
+    parser.add_argument('--hidden', type=int, default=32)
     parser.add_argument('--n-heads', type=int, default=1)
     parser.add_argument('--pooling', choices=['mean', 'cls'], default='mean')
     parser.add_argument('--dropout', type=float, default=0.3)
     parser.add_argument('--bottleneck-dim', type=int, default=None)
     parser.add_argument('--max-windows', type=int, default=50)
-    parser.add_argument('--lr', type=float, default=5e-4)
-    parser.add_argument('--wd', type=float, default=5e-3)
-    parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--patience', type=int, default=30)
+    parser.add_argument('--lr', type=float, default=3e-4)
+    parser.add_argument('--wd', type=float, default=1e-3)
+    parser.add_argument('--epochs', type=int, default=BB_EPOCHS)
+    parser.add_argument('--bb-patience', type=int, default=BB_PATIENCE,
+                        help=f'Patience for backbone early stopping (default: {BB_PATIENCE})')
     parser.add_argument('--lr-fusion', type=float, default=5e-4)
-    parser.add_argument('--wd-fusion', type=float, default=1e-3)
+    parser.add_argument('--wd-fusion', type=float, default=5e-3)
     parser.add_argument('--fusion-epochs', type=int, default=75)
     parser.add_argument('--fusion-patience', type=int, default=20)
     parser.add_argument('--bs', type=int, default=8)
@@ -658,37 +673,54 @@ def run_experiment(seed, args, cv_seed=None):
                     aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods = \
                     build_backbone_dataset(eeg_dict, aud_dict, mapping, inner_tr_paired)
 
-                # ── Train clean EEG backbone ──
+                # ── Train clean EEG backbone (proper validation split) ──
                 print('    Training clean EEG backbone (inner_vl excluded)...')
                 inner_seed = cv_seed + fi * 10 + inner_fi
                 n_bb = len(eeg_bb_tr_labels)
                 n_bb_ch = eeg_bb_tr_data[0].shape[1]
+                from sklearn.model_selection import StratifiedShuffleSplit
+                sss = StratifiedShuffleSplit(n_splits=1, test_size=min(4, max(1, n_bb // 6)),
+                                             random_state=inner_seed + 999)
+                bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), eeg_bb_tr_labels))
                 tr_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
-                                      list(range(n_bb)),
+                                      bb_tr_i.tolist(),
                                       max_windows=args.max_windows, augmenter=bb_eeg_aug, seed=inner_seed)
+                vl_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
+                                      bb_vl_i.tolist(),
+                                      max_windows=args.max_windows, seed=inner_seed)
                 tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
+                vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 eeg_model = DeepConvNetWrapper(n_bb_ch, N_EEG_SAMPLES).to(device)
                 if fi == 0 and inner_fi == 0:
                     print(f'    EEG params: {sum(p.numel() for p in eeg_model.parameters()):,}')
-                eeg_best_st, eeg_best_loss, _, _ = train_backbone(eeg_model, tr_ldr, tr_ldr, args)
+                eeg_best_st, eeg_best_vb, eeg_best_ep, _ = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
                 eeg_model.load_state_dict(eeg_best_st)
                 eeg_model.eval()
-                del tr_ds, tr_ldr
+                print(f'    EEG backbone done: val_bacc={eeg_best_vb:.3f} best_ep={eeg_best_ep}')
+                del tr_ds, vl_ds, tr_ldr, vl_ldr
 
-                # ── Train clean audio backbone ──
+                # ── Train clean audio backbone (proper validation split) ──
                 print('    --- Training clean Audio backbone...')
                 n_bb = len(aud_bb_tr_labels)
+                sss = StratifiedShuffleSplit(n_splits=1, test_size=min(4, max(1, n_bb // 6)),
+                                             random_state=inner_seed + 888)
+                bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), aud_bb_tr_labels))
                 tr_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
-                                       list(range(n_bb)),
-                                       max_windows=args.max_windows, augmenter=bb_aud_aug, seed=inner_seed)
+                                      bb_tr_i.tolist(),
+                                      max_windows=args.max_windows, augmenter=bb_aud_aug, seed=inner_seed)
+                vl_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
+                                      bb_vl_i.tolist(),
+                                      max_windows=args.max_windows, seed=inner_seed)
                 tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
+                vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
                 if fi == 0 and inner_fi == 0:
                     print(f'    Audio params: {sum(p.numel() for p in aud_model.parameters()):,}')
-                aud_best_st, aud_best_loss, _, _ = train_backbone(aud_model, tr_ldr, tr_ldr, args)
+                aud_best_st, aud_best_vb, aud_best_ep, _ = train_backbone(aud_model, tr_ldr, vl_ldr, args)
                 aud_model.load_state_dict(aud_best_st)
                 aud_model.eval()
-                del tr_ds, tr_ldr
+                print(f'    Audio backbone done: val_bacc={aud_best_vb:.3f} best_ep={aud_best_ep}')
+                del tr_ds, vl_ds, tr_ldr, vl_ldr
 
                 # ── Extract features with CLEAN backbones ──
                 eeg_aug = EEGAugment(noise_std=args.noise_std,
@@ -729,7 +761,7 @@ def run_experiment(seed, args, cv_seed=None):
                     args)
 
                 # Evaluate on inner validation
-                yt, yp, ypr = [], [], []
+                yt, yp, ypr, attn_per_subj = [], [], [], []
                 for si in range(len(inner_vl_paired)):
                     yt_s, yp_s, ypr_s = _eval_fn(
                         fusion_model,
@@ -738,6 +770,13 @@ def run_experiment(seed, args, cv_seed=None):
                     yt.append(yt_s[0])
                     yp.append(yp_s[0])
                     ypr.append(ypr_s[0])
+                    # Capture attention weights for interpretability
+                    if hasattr(fusion_model, '_attn_weights') and fusion_model._attn_weights is not None:
+                        attn_per_subj.append({
+                            'subject': inner_vl_paired[si][0],
+                            'eeg2audio': float(fusion_model._attn_weights[0].mean().item()),
+                            'audio2eeg': float(fusion_model._attn_weights[1].mean().item()),
+                        })
                 inner_bacc = balanced_accuracy_score(np.array(yt), np.array(yp))
                 print(f'    >>> Inner fold {inner_fi + 1} val_bacc={inner_bacc:.3f}  best_ep={fusion_best_ep}')
                 inner_best_vbs.append(inner_bacc)
@@ -749,6 +788,8 @@ def run_experiment(seed, args, cv_seed=None):
                     'inner_val_subjects': [p[0] for p in inner_vl_paired],
                     'eeg_backbone_subjects': eeg_bb_tr_cods,
                     'aud_backbone_subjects': aud_bb_tr_cods,
+                    'attention_per_subject': attn_per_subj,
+                    'fusion_best_epoch': fusion_best_ep,
                 })
 
                 # Cleanup
@@ -766,33 +807,47 @@ def run_experiment(seed, args, cv_seed=None):
             # ── Now train FINAL model on ALL tr_paired (no more validation needed) ──
             print('\n  --- Training FINAL backbones on ALL paired subjects ---')
 
-            # Train EEG backbone on ALL tr_paired + unpaired
+            # Train EEG backbone on ALL tr_paired + unpaired (proper val split)
             inner_seed = cv_seed + fi
             n_bb = len(eeg_bb_labels)
             n_bb_ch = eeg_bb_data[0].shape[1]
+            sss = StratifiedShuffleSplit(n_splits=1, test_size=min(4, max(1, n_bb // 6)),
+                                         random_state=inner_seed + 999)
+            bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), eeg_bb_labels))
             tr_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
-                                  list(range(n_bb)),
+                                  bb_tr_i.tolist(),
                                   max_windows=args.max_windows, augmenter=bb_eeg_aug, seed=inner_seed)
+            vl_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
+                                  bb_vl_i.tolist(),
+                                  max_windows=args.max_windows, seed=inner_seed)
             tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
+            vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
             eeg_model = DeepConvNetWrapper(n_bb_ch, N_EEG_SAMPLES).to(device)
-            eeg_best_st, eeg_best_loss, _, eeg_history = train_backbone(eeg_model, tr_ldr, tr_ldr, args)
+            eeg_best_st, eeg_best_vb, eeg_best_ep, eeg_history = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
             eeg_model.load_state_dict(eeg_best_st)
             eeg_model.eval()
-            del tr_ds, tr_ldr
-            print(f'    EEG backbone final train loss: {eeg_best_loss:.4f}')
+            del tr_ds, vl_ds, tr_ldr, vl_ldr
+            print(f'    EEG backbone final: val_bacc={eeg_best_vb:.3f} best_ep={eeg_best_ep}')
 
-            # Train audio backbone on ALL tr_paired + unpaired
+            # Train audio backbone on ALL tr_paired + unpaired (proper val split)
             n_bb = len(aud_bb_labels)
+            sss = StratifiedShuffleSplit(n_splits=1, test_size=min(4, max(1, n_bb // 6)),
+                                         random_state=inner_seed + 888)
+            bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), aud_bb_labels))
             tr_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
-                                  list(range(n_bb)),
+                                  bb_tr_i.tolist(),
                                   max_windows=args.max_windows, augmenter=bb_aud_aug, seed=inner_seed)
+            vl_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
+                                  bb_vl_i.tolist(),
+                                  max_windows=args.max_windows, seed=inner_seed)
             tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
+            vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
             aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
-            aud_best_st, aud_best_loss, _, aud_history = train_backbone(aud_model, tr_ldr, tr_ldr, args)
+            aud_best_st, aud_best_vb, aud_best_ep, aud_history = train_backbone(aud_model, tr_ldr, vl_ldr, args)
             aud_model.load_state_dict(aud_best_st)
             aud_model.eval()
-            del tr_ds, tr_ldr
-            print(f'    Audio backbone final train loss: {aud_best_loss:.4f}')
+            del tr_ds, vl_ds, tr_ldr, vl_ldr
+            print(f'    Audio backbone final: val_bacc={aud_best_vb:.3f} best_ep={aud_best_ep}')
 
             # Extract features from ALL tr_paired (final)
             eeg_aug = None
@@ -880,7 +935,7 @@ def run_experiment(seed, args, cv_seed=None):
 
             # ── Evaluate on test subjects ──
             print('\n  --- Evaluating ---')
-            y_true_list, y_pred_list, y_prob_list = [], [], []
+            y_true_list, y_pred_list, y_prob_list, test_attn = [], [], [], []
             for si in range(len(te_paired)):
                 yt, yp, ypr = _eval_fn(
                     fusion_model,
@@ -889,6 +944,13 @@ def run_experiment(seed, args, cv_seed=None):
                 y_true_list.append(yt[0])
                 y_pred_list.append(yp[0])
                 y_prob_list.append(ypr[0])
+                # Capture attention for post-hoc interpretability
+                if hasattr(fusion_model, '_attn_weights') and fusion_model._attn_weights is not None:
+                    test_attn.append({
+                        'subject': te_paired[si][0],
+                        'eeg2audio': float(fusion_model._attn_weights[0].mean().item()),
+                        'audio2eeg': float(fusion_model._attn_weights[1].mean().item()),
+                    })
 
             y_true_s = np.array(y_true_list)
             y_pred_s = np.array(y_pred_list)
@@ -908,8 +970,8 @@ def run_experiment(seed, args, cv_seed=None):
                 'final_fusion_epochs': final_fusion_epochs,
                 'inner_folds_val_baccs': [float(v) for v in inner_best_vbs],
                 'inner_folds_best_epochs': [int(e) for e in inner_best_eps],
-                'eeg_backbone_val_loss': float(eeg_best_loss),
-                'aud_backbone_val_loss': float(aud_best_loss),
+                'eeg_backbone_val_bacc': float(eeg_best_vb),
+                'aud_backbone_val_bacc': float(aud_best_vb),
                 'test_metrics': fm,
                 'test_bacc': float(bacc),
                 'test_acc': float(fm['acc']),
@@ -932,6 +994,7 @@ def run_experiment(seed, args, cv_seed=None):
                 'eeg_backbone_subjects': eeg_bb_cods,
                 'aud_backbone_subjects': aud_bb_cods,
                 'inner_folds': inner_folds_info,
+                'test_attention': test_attn,
             })
             print(f'  Fold {fi + 1}: inner_cv_val={avg_inner_val:.3f}  '
                   f'test_bacc={bacc:.3f}  test_auc={roc_auc:.3f}')
@@ -948,6 +1011,8 @@ def run_experiment(seed, args, cv_seed=None):
                     'args': vars(args),
                     'test_bacc': float(bacc),
                     'test_auc': roc_auc,
+                    'test_attention': test_attn,
+                    'inner_folds': inner_folds_info,
                 }, os.path.join(ckpt_dir, f'fold_{fi+1}.pt'))
                 print(f'    Saved: fold_{fi+1}.pt')
 
