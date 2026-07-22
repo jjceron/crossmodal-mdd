@@ -23,7 +23,7 @@ from datetime import datetime
 import subprocess
 
 warnings.filterwarnings('ignore')
-torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.benchmark = False
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 NUM_WORKERS = 4 if platform.system() != 'Windows' else 0
 sys.path.insert(0, '.')
@@ -678,7 +678,6 @@ def run_experiment(seed, args, cv_seed=None):
                 inner_seed = cv_seed + fi * 10 + inner_fi
                 n_bb = len(eeg_bb_tr_labels)
                 n_bb_ch = eeg_bb_tr_data[0].shape[1]
-                from sklearn.model_selection import StratifiedShuffleSplit
                 sss = StratifiedShuffleSplit(n_splits=1, test_size=min(4, max(1, n_bb // 6)),
                                              random_state=inner_seed + 999)
                 bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), eeg_bb_tr_labels))
