@@ -1,14 +1,8 @@
-"""CrossModal Attention: multimodal fusion with self-attention post-fusion.
-
-Modes:
-  concat       — concat(e, a) → Linear → pool → head
-  gating       — g * e + (1-g) * a → pool → head
-  cross_attn   — bidirectional cross-MHA → pool → head (w/ optional self-attn)
+"""Multi-modal fusion: project, fuse, self-attend, pool, classify.
 
 Usage:
-  model = CrossModalAttention(eeg_dim=128, aud_dim=576, hidden=64,
-                               fusion='cross_attn', n_self_attn_layers=1)
-  logits = model(z_eeg, z_audio, mask)  # [B, K, dim] → [B]
+  model = CrossModalAttention(eeg_dim, aud_dim, fusion='cross_attn')
+  logits = model(z_eeg, z_audio, mask)  # [B, K, dim] -> [B]
 """
 import torch
 import torch.nn as nn
@@ -128,7 +122,7 @@ class CrossModalAttention(nn.Module):
                  bottleneck_dim=None, n_self_attn_layers=0,
                  self_attn_heads=4, self_attn_dropout=0.1,
                  fusion='cross_attn', pooling='mean', dropout=0.5,
-                 param_control=False, adapter_dim=None, window_aux=False,
+                 adapter_dim=None, window_aux=False,
                  feat_dropout=0.0):
         super().__init__()
         self.fusion = fusion
@@ -182,14 +176,6 @@ class CrossModalAttention(nn.Module):
             self.cls_token = nn.Parameter(torch.randn(1, 1, hidden))
             self.pool = AttentionPool(hidden)
 
-        # Param-control MLP (matches param count of one self-attn block)
-        if param_control:
-            self.ctrl_mlp = nn.Sequential(
-                nn.Linear(hidden, hidden * 4),
-                nn.GELU(),
-                nn.Linear(hidden * 4, hidden),
-            )
-
         # Classifier head
         self.head = nn.Sequential(
             nn.Linear(hidden, hidden),
@@ -229,9 +215,6 @@ class CrossModalAttention(nn.Module):
         elif self.fusion == 'cross_attn':
             e_out, a_out, self._attn_weights = self.cross(e, a, mask)
             z = (e_out + a_out) / 2
-
-        if hasattr(self, 'ctrl_mlp'):
-            z = z + self.ctrl_mlp(z)
 
         attn_mask = (mask == 0) if mask is not None else None
         for layer in self.self_attn_layers:
