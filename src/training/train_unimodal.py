@@ -133,13 +133,16 @@ class WindowDataset(Dataset):
 
 # ── Training ──
 
-def train_backbone(model, train_loader, val_loader, args):
+def train_backbone(model, train_loader, val_loader, args, max_epochs=None):
+    if max_epochs is None:
+        max_epochs = args.epochs
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wd, foreach=False)
-    sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
+    sched = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='max', factor=0.5, patience=10)
     crit = nn.BCEWithLogitsLoss()
     logger = ClassificationLogger()
     logger.log_header()
-    for ep in range(1, args.epochs + 1):
+    best_vb, best_st, best_ep, pat = 0.0, None, 0, 0
+    for ep in range(1, max_epochs + 1):
         model.train()
         tr_loss, tr_n = 0.0, 0
         tr_logits, tr_labels = [], []
@@ -172,14 +175,25 @@ def train_backbone(model, train_loader, val_loader, args):
         vl_loss = crit(torch.cat(vl_logits).to(device), torch.cat(vl_labels).to(device)).item()
         vl_pred = (torch.sigmoid(torch.cat(vl_logits)).numpy() >= 0.5).astype(int)
         vl_m = logger.metrics(torch.cat(vl_labels).numpy(), vl_pred)
-        sched.step()
+        sched.step(vl_m['bacc'])
 
-        if ep == 1 or ep % 10 == 0:
-            logger.log_epoch(ep, tr_loss, vl_loss, tr_m, vl_m, 0)
+        if vl_m['bacc'] > best_vb:
+            best_vb = vl_m['bacc']
+            best_st = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            best_ep = ep
+            pat = 0
+        else:
+            pat += 1
 
-    final_st = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-    final_vl = float(vl_loss)
-    return final_st, final_vl, args.epochs
+        if ep == 1 or pat == 0 or ep % 10 == 0:
+            logger.log_epoch(ep, tr_loss, vl_loss, tr_m, vl_m, pat)
+
+        if pat >= args.bb_patience:
+            break
+
+    if best_st is not None:
+        model.load_state_dict(best_st)
+    return best_st, best_vb, best_ep
 
 # ── Evaluation ──
 
@@ -221,7 +235,8 @@ def main():
     parser.add_argument('--max-windows', type=int, default=200)
     parser.add_argument('--lr', type=float, default=5e-4)
     parser.add_argument('--wd', type=float, default=5e-3)
-    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--epochs', type=int, default=300)
+    parser.add_argument('--bb-patience', type=int, default=40)
     parser.add_argument('--outer-folds', type=int, default=5)
     parser.add_argument('--inner-folds', type=int, default=5)
     parser.add_argument('--tag', type=str, default=None)
@@ -334,9 +349,11 @@ def run_seed(seed, args, is_eeg):
             if fi == 0 and inner_fi == 0:
                 print(f'    Params: {sum(p.numel() for p in model.parameters()):,}')
             print('    Training backbone...')
-            best_st, best_loss, _ = train_backbone(model, train_ldr, val_ldr, args)
+            best_st, best_vb, best_ep = train_backbone(model, train_ldr, val_ldr, args)
             model.load_state_dict(best_st)
             model.eval()
+            print(f'    Backbone done: val_bacc={best_vb:.3f} best_ep={best_ep}')
+            inner_best_eps.append(best_ep)
 
             # Evaluate on inner_vl
             vl_data_list = [subj_dict[sid]['windows'] for sid in inner_vl_ids]
@@ -352,8 +369,12 @@ def run_seed(seed, args, is_eeg):
             inner_bacc = balanced_accuracy_score(yt_vl_s, yp_vl_s)
             print(f'    >>> Inner fold {inner_fi + 1} val_bacc={inner_bacc:.3f}')
 
+        # ── Aggregate inner CV ──
+        avg_best_ep = int(round(np.mean(inner_best_eps))) if inner_best_eps else args.epochs
+        print(f'\n  *** Inner CV: avg_best_ep={avg_best_ep}  (final backbone epochs) ***')
+
         # ── Train FINAL backbone on ALL training subjects ──
-        print('\n    --- Training FINAL backbone on ALL training subjects ---')
+        print(f'\n    --- Training FINAL backbone ({avg_best_ep} epochs) ---')
         bb_data = [subj_dict[sid]['windows'] for sid in tr_ids]
         bb_labels = np.array([subj_dict[sid]['label'] for sid in tr_ids])
         bb_cods = tr_ids
@@ -379,9 +400,10 @@ def run_seed(seed, args, is_eeg):
         val_ldr = DataLoader(val_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
 
         model = DeepConvNetWrapper(n_ch, n_samples).to(device) if is_eeg else ShallowConvNetWrapper(n_ch, n_samples).to(device)
-        best_st, best_loss, _ = train_backbone(model, train_ldr, val_ldr, args)
+        best_st, best_vb, best_ep = train_backbone(model, train_ldr, val_ldr, args, max_epochs=avg_best_ep)
         model.load_state_dict(best_st)
         model.eval()
+        print(f'    Final backbone done: val_bacc={best_vb:.3f} best_ep={best_ep}')
 
         # ── Evaluate on test subjects ──
         te_data_list = [subj_dict[sid]['windows'] for sid in te_ids]
@@ -415,7 +437,8 @@ def run_seed(seed, args, is_eeg):
             'model': args.model,
             'modal': modal,
             'cache_suffix': cache_label,
-            'eeg_backbone_val_loss': float(best_loss),
+            'avg_best_ep': avg_best_ep,
+            'eeg_backbone_val_bacc': float(best_vb),
         })
 
         # Save checkpoint
@@ -442,6 +465,7 @@ def run_seed(seed, args, is_eeg):
             'config': {
                 'model': args.model, 'modal': modal, 'cache_suffix': cache_label,
                 'lr': args.lr, 'wd': args.wd, 'epochs': args.epochs,
+                'bb_patience': args.bb_patience,
                 'max_windows': args.max_windows,
                 'outer_folds': args.outer_folds, 'inner_folds': args.inner_folds,
             },
@@ -488,6 +512,7 @@ def run_seed(seed, args, is_eeg):
             'config': {
                 'model': args.model, 'modal': modal, 'cache_suffix': cache_label,
                 'lr': args.lr, 'wd': args.wd, 'epochs': args.epochs,
+                'bb_patience': args.bb_patience,
                 'max_windows': args.max_windows,
                 'outer_folds': args.outer_folds, 'inner_folds': args.inner_folds,
             },
