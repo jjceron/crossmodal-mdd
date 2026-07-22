@@ -61,6 +61,7 @@ class CrossModalFusion(nn.Module):
         self.n_heads = n_heads
         self.d_head = dim // n_heads
         self.scale = self.d_head ** -0.5
+        self.logit_scale = nn.Parameter(torch.ones(1) * math.log(10.0))
 
         self.e_q = nn.Linear(dim, dim, bias=False)
         self.e_k = nn.Linear(dim, dim, bias=False)
@@ -79,7 +80,7 @@ class CrossModalFusion(nn.Module):
         q = q.view(B, L, self.n_heads, self.d_head).transpose(1, 2)
         k = k.view(B, -1, self.n_heads, self.d_head).transpose(1, 2)
         v = v.view(B, -1, self.n_heads, self.d_head).transpose(1, 2)
-        attn = q @ k.transpose(-2, -1) * self.scale
+        attn = q @ k.transpose(-2, -1) * self.scale * self.logit_scale.exp()
         if mask is not None:
             attn = attn.masked_fill(mask.unsqueeze(1).unsqueeze(2) == 0, float('-inf'))
         attn = torch.softmax(attn, dim=-1)
@@ -238,6 +239,12 @@ class CrossModalAttention(nn.Module):
             win_logits = win_logits.masked_fill(mask == 0, float('-inf'))
         return win_logits
 
+    def _win_logits_post(self, z, mask):
+        win_logits = self.head(z).squeeze(-1)  # [B, K]
+        if mask is not None:
+            win_logits = win_logits.masked_fill(mask == 0, float('-inf'))
+        return win_logits
+
     def forward(self, z_eeg, z_audio, mask=None, return_window=False):
         """
         Args:
@@ -246,12 +253,13 @@ class CrossModalAttention(nn.Module):
             mask:    [B, K] — 1=valid window, 0=padding (or None)
             return_window: if True, also return window-level logits
         Returns:
-            logits: [B]  (or (logits, win_logits) if return_window)
+            logits: [B]
+            (or (logits, win_logits_pre, win_logits_post) if return_window)
         """
         B = z_eeg.shape[0]
 
-        # Window-level auxiliary logits (before fusion, from raw projections)
-        win_logits = None
+        # Pre-fusion window logits (from raw projections, before cross-attn)
+        win_logits_pre = None
         if return_window and hasattr(self, 'win_cls'):
             z_eeg_in = z_eeg
             z_audio_in = z_audio
@@ -260,24 +268,29 @@ class CrossModalAttention(nn.Module):
                 z_audio_in = torch.relu(self.aud_bottleneck(z_audio))
             e_aux = self.eeg_rms(self.eeg_proj(z_eeg_in))
             a_aux = self.aud_rms(self.aud_proj(z_audio_in))
-            win_logits = self.win_cls(e_aux, a_aux)  # [B*K]
+            win_logits_pre = self.win_cls(e_aux, a_aux)  # [B*K]
 
         # Shared encoding
         z = self._encode(z_eeg, z_audio, mask)  # [B, K, hidden]
 
+        # Post-fusion window logits (after full pipeline, via head)
+        win_logits_post = None
+        if return_window:
+            win_logits_post = self._win_logits_post(z, mask)  # [B, K]
+
         # Pooling
         if self.pooling == 'mean':
             if mask is not None:
-                z = (z * mask.unsqueeze(-1)).sum(dim=1) / mask.sum(dim=1, keepdim=True).clamp(min=1)
+                z_pooled = (z * mask.unsqueeze(-1)).sum(dim=1) / mask.sum(dim=1, keepdim=True).clamp(min=1)
             else:
-                z = z.mean(dim=1)
+                z_pooled = z.mean(dim=1)
         elif self.pooling == 'cls':
             cls = self.cls_token.expand(B, -1, -1)
-            z = torch.cat([cls, z], dim=1)
-            z = self.pool(z)
+            z_pooled = torch.cat([cls, z], dim=1)
+            z_pooled = self.pool(z_pooled)
 
         # Classifier
-        logits = self.head(z).squeeze(-1)
+        logits = self.head(z_pooled).squeeze(-1)
         if return_window:
-            return logits, win_logits
+            return logits, win_logits_pre, win_logits_post
         return logits

@@ -368,19 +368,26 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
             return_window = args.window_aux and model.training
             out = model(ze, za, mask=m, return_window=return_window)
             if return_window:
-                logits, win_logits = out
+                logits, win_logits_pre, win_logits_post = out
             else:
                 logits = out
-                win_logits = None
+                win_logits_pre = None
+                win_logits_post = None
             y_smooth = yb * 0.95 + 0.025
             loss = crit(logits, y_smooth)
-            if win_logits is not None:
+            if return_window:
                 K = ze.shape[1]
                 y_win = yb.unsqueeze(1).expand(-1, K).reshape(-1)
                 mask_flat = m.reshape(-1)
-                win_loss = crit(win_logits, y_win * 0.95 + 0.025)
-                win_loss = (win_loss * mask_flat).sum() / mask_flat.sum().clamp(min=1)
-                loss = loss + args.window_aux_weight * win_loss
+                # Pre-fusion window loss (from WinClassifier, before cross-attn)
+                if win_logits_pre is not None:
+                    pre_loss = crit(win_logits_pre, y_win * 0.95 + 0.025)
+                    pre_loss = (pre_loss * mask_flat).sum() / mask_flat.sum().clamp(min=1)
+                    loss = loss + args.window_aux_weight * pre_loss
+                # Post-fusion window loss (gradient flows through head → self-attn → cross_attn)
+                post_loss = crit(win_logits_post, y_win * 0.95 + 0.025)
+                post_loss = (post_loss * mask_flat).sum() / mask_flat.sum().clamp(min=1)
+                loss = loss + args.window_aux_weight * post_loss
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
@@ -507,10 +514,10 @@ def main():
     parser.add_argument('--n-self-attn-layers', type=int, default=1)
     parser.add_argument('--self-attn-heads', type=int, default=4)
     parser.add_argument('--self-attn-dropout', type=float, default=0.1)
-    parser.add_argument('--hidden', type=int, default=32)
-    parser.add_argument('--n-heads', type=int, default=1)
+    parser.add_argument('--hidden', type=int, default=64)
+    parser.add_argument('--n-heads', type=int, default=4)
     parser.add_argument('--pooling', choices=['mean', 'cls'], default='mean')
-    parser.add_argument('--dropout', type=float, default=0.3)
+    parser.add_argument('--dropout', type=float, default=0.5)
     parser.add_argument('--bottleneck-dim', type=int, default=None)
     parser.add_argument('--max-windows', type=int, default=50)
     parser.add_argument('--lr', type=float, default=3e-4)
@@ -769,12 +776,19 @@ def run_experiment(seed, args, cv_seed=None):
                     yt.append(yt_s[0])
                     yp.append(yp_s[0])
                     ypr.append(ypr_s[0])
-                    # Capture attention weights for interpretability
                     if hasattr(fusion_model, '_attn_weights') and fusion_model._attn_weights is not None:
+                        aw0 = fusion_model._attn_weights[0]
+                        aw1 = fusion_model._attn_weights[1]
                         attn_per_subj.append({
                             'subject': inner_vl_paired[si][0],
-                            'eeg2audio': float(fusion_model._attn_weights[0].mean().item()),
-                            'audio2eeg': float(fusion_model._attn_weights[1].mean().item()),
+                            'eeg2audio_mean': float(aw0.mean().item()),
+                            'eeg2audio_std': float(aw0.std().item()),
+                            'eeg2audio_max': float(aw0.max().item()),
+                            'eeg2audio_min': float(aw0.min().item()),
+                            'audio2eeg_mean': float(aw1.mean().item()),
+                            'audio2eeg_std': float(aw1.std().item()),
+                            'audio2eeg_max': float(aw1.max().item()),
+                            'audio2eeg_min': float(aw1.min().item()),
                         })
                 inner_bacc = balanced_accuracy_score(np.array(yt), np.array(yp))
                 print(f'    >>> Inner fold {inner_fi + 1} val_bacc={inner_bacc:.3f}  best_ep={fusion_best_ep}')
@@ -943,12 +957,19 @@ def run_experiment(seed, args, cv_seed=None):
                 y_true_list.append(yt[0])
                 y_pred_list.append(yp[0])
                 y_prob_list.append(ypr[0])
-                # Capture attention for post-hoc interpretability
                 if hasattr(fusion_model, '_attn_weights') and fusion_model._attn_weights is not None:
+                    aw0 = fusion_model._attn_weights[0]
+                    aw1 = fusion_model._attn_weights[1]
                     test_attn.append({
                         'subject': te_paired[si][0],
-                        'eeg2audio': float(fusion_model._attn_weights[0].mean().item()),
-                        'audio2eeg': float(fusion_model._attn_weights[1].mean().item()),
+                        'eeg2audio_mean': float(aw0.mean().item()),
+                        'eeg2audio_std': float(aw0.std().item()),
+                        'eeg2audio_max': float(aw0.max().item()),
+                        'eeg2audio_min': float(aw0.min().item()),
+                        'audio2eeg_mean': float(aw1.mean().item()),
+                        'audio2eeg_std': float(aw1.std().item()),
+                        'audio2eeg_max': float(aw1.max().item()),
+                        'audio2eeg_min': float(aw1.min().item()),
                     })
 
             y_true_s = np.array(y_true_list)
