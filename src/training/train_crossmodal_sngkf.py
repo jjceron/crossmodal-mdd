@@ -39,14 +39,14 @@ from src.utils.get_seed import set_seed, parse_seeds  # noqa: E402
 class DeepConvNetWrapper(nn.Module):
     def __init__(self, n_channels, n_samples):
         super().__init__()
-        self.m = DeepConvNet(n_channels, 1, n_samples, 0.7)
+        self.m = DeepConvNet(n_channels, 1, n_samples, 0.5)
     def forward(self, x): return self.m(x).squeeze(-1)
     def forward_features(self, x): return self.m.forward_features(x)
 
 class ShallowConvNetWrapper(nn.Module):
     def __init__(self, n_channels, n_samples):
         super().__init__()
-        self.m = ShallowConvNet(n_channels, 1, n_samples, 0.7)
+        self.m = ShallowConvNet(n_channels, 1, n_samples, 0.5)
     def forward(self, x): return self.m(x).squeeze(-1)
     def forward_features(self, x): return self.m.forward_features(x)
 
@@ -536,7 +536,7 @@ def main():
     parser.add_argument('--window-aux', action='store_true')
     parser.add_argument('--window-aux-weight', type=float, default=0.3)
     parser.add_argument('--mixup-alpha', type=float, default=0.0)
-    parser.add_argument('--feat-dropout', type=float, default=0.2)
+    parser.add_argument('--feat-dropout', type=float, default=0.1)
     parser.add_argument('--cache-suffix', type=str, default='64ch',
                         help='EEG cache suffix (e.g. 64ch, 64ch_ica, 19ch, ftsm32)')
     parser.add_argument('--loocv', action='store_true')
