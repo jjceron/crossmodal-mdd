@@ -76,8 +76,6 @@ def _load_eeg_cache(suffix='64ch'):
     cods = list(c['subject_ids'])
     n_samples = data[0].shape[2]
     n_ch = data[0].shape[1]
-    print(f'  EEG: {len(cods)} subj ({int(labels.sum())} MDD, {int((1-labels).sum())} HC), '
-          f'windows: {n_ch}ch x {n_samples}')
     return data, labels, cods
 
 def _load_audio_cache(path=AUDIO_CACHE):
@@ -85,7 +83,6 @@ def _load_audio_cache(path=AUDIO_CACHE):
     data = list(c['windows'])
     labels = c['labels'].astype(int)
     cods = [str(s) for s in c['subject_ids']]
-    print(f'  Audio: {len(cods)} subj ({int(labels.sum())} MDD, {int((1-labels).sum())} HC)')
     return data, labels, cods
 
 def _load_mapping(path=MAPPING_PATH):
