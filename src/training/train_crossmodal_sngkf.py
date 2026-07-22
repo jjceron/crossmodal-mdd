@@ -786,7 +786,7 @@ def run_experiment(seed, args, cv_seed=None):
                     feat_dropout=args.feat_dropout,
                 ).to(device)
 
-                fusion_model, _, fusion_best_ep, _ = train_fusion_head(
+                fusion_model, _, fusion_best_ep, fusion_history = train_fusion_head(
                     fusion_model,
                     Z_e_tr, Z_a_tr, mask_tr, y_inner_tr,
                     Z_e_vl, Z_a_vl, mask_vl, y_inner_vl,
@@ -829,6 +829,7 @@ def run_experiment(seed, args, cv_seed=None):
                     'aud_backbone_subjects': aud_bb_tr_cods,
                     'attention_per_subject': attn_per_subj,
                     'fusion_best_epoch': fusion_best_ep,
+                    'fusion_history': fusion_history,
                 })
 
                 # Cleanup
