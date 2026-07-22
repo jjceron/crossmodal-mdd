@@ -996,7 +996,8 @@ def run_experiment(seed, args, cv_seed=None):
                 'test_attention': test_attn,
             })
             print(f'  Fold {fi + 1}: inner_cv_val={avg_inner_val:.3f}  '
-                  f'test_bacc={bacc:.3f}  test_auc={roc_auc:.3f}')
+                  f'test_bacc={bacc:.3f}  test_auc={roc_auc:.3f}  '
+                  f'sens={fm["sens"]:.3f}  spec={fm["spec"]:.3f}  f1={fm["f1"]:.3f}')
 
             # Save checkpoint
             if args.save_model:
@@ -1056,7 +1057,7 @@ def run_experiment(seed, args, cv_seed=None):
                     'backbone_lr': args.lr,
                     'backbone_wd': args.wd,
                     'backbone_epochs': args.epochs,
-                    'backbone_patience': args.patience,
+                    'backbone_patience': args.bb_patience,
                     'fusion_lr': args.lr_fusion,
                     'fusion_wd': args.wd_fusion,
                     'fusion_epochs': args.fusion_epochs,
@@ -1167,7 +1168,7 @@ def run_experiment(seed, args, cv_seed=None):
                 'backbone_lr': args.lr,
                 'backbone_wd': args.wd,
                 'backbone_epochs': args.epochs,
-                'backbone_patience': args.patience,
+                'backbone_patience': args.bb_patience,
                 'fusion_lr': args.lr_fusion,
                 'fusion_wd': args.wd_fusion,
                 'fusion_epochs': args.fusion_epochs,
