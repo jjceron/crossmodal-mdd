@@ -1,27 +1,8 @@
-"""
-Strict nested cross-modal training — fixes fusion validation leakage.
-
-Problem in original train_crossmodal_strict.py:
-  Backbones are trained on ALL tr_paired subjects (~31), then fusion validation
-  split comes from the same tr_paired — val subjects were already seen by backbone.
-
-Fix:
-  For each outer fold's tr_paired (~31):
-    - Inner 3-fold CV over tr_paired only
-    - For each inner fold:
-      1. Exclude inner_val subjects from backbone training (re-train backbones
-         on ~60-2=58 subjects instead of ~60)
-      2. Extract features with those clean backbones
-      3. Train fusion on inner_train, validate on inner_val
-    - Average val_bacc and best_epoch across inner folds
-    - Finally: train backbones on ALL tr_paired + unpaired (~60),
-      train fusion for avg_best_epoch (from inner CV) epochs
-
-Outer test subjects remain completely unseen throughout.
+"""Nested cross-modal SNGKF: inner CV selects best epoch, outer CV evaluates.
 
 Usage:
-  py src/training/train_crossmodal_strict_nested.py --fusion cross_attn --dropout 0.7 --max-windows 200
-  py src/training/train_crossmodal_strict_nested.py --fusion cross_attn --dropout 0.7 --max-windows 200 --bottleneck-dim 32
+  python -m src.training.train_crossmodal_sngkf --fusion cross_attn --tag v1 --seed 42 100 123
+  python -m src.training.train_crossmodal_sngkf --fusion concat --loocv --tag loo_v1
 """
 import sys
 import os
@@ -82,7 +63,6 @@ N_MELS = 64
 N_AUDIO_SAMPLES = 200
 N_EEG_SAMPLES = 500
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-set_seed(RANDOM_STATE)
 
 # ── Data loading (same as original) ──
 
@@ -282,16 +262,7 @@ def train_backbone(model, train_loader, val_loader, args):
 
 # ── Feature extraction ──
 
-def _encode_eeg(model, windows, device):
-    K = windows.shape[0]
-    feats = []
-    for i in range(0, K, 32):
-        batch = torch.from_numpy(windows[i:i+32]).float().to(device)
-        with torch.no_grad():
-            feats.append(model.forward_features(batch).cpu())
-    return torch.cat(feats, dim=0).numpy()
-
-def _encode_audio(model, windows, device):
+def _encode(model, windows, device):
     K = windows.shape[0]
     feats = []
     for i in range(0, K, 32):
@@ -314,8 +285,8 @@ def extract_subject_features(eeg_model, aud_model, eeg_wins, aud_wins,
         we = np.array([eeg_augment(we[i]) for i in range(K)])
     if aud_augment is not None:
         wa = np.array([aud_augment(wa[i]) for i in range(K)])
-    ze = _encode_eeg(eeg_model, we, device)
-    za = _encode_audio(aud_model, wa, device)
+    ze = _encode(eeg_model, we, device)
+    za = _encode(aud_model, wa, device)
     return ze, za
 
 def extract_all_features(eeg_model, aud_model, subj_pairs, eeg_subjs, aud_subjs,
@@ -557,7 +528,7 @@ def main():
     parser.add_argument('--outer-folds', type=int, default=N_FOLDS,
                         help='Number of outer CV folds (default: 5)')
     parser.add_argument('--inner-folds', type=int, default=INNER_FUSION_FOLDS,
-                        help='Number of inner CV folds for fusion validation (default: 3)')
+                        help=f'Number of inner CV folds (default: {INNER_FUSION_FOLDS})')
     parser.add_argument('--tag', type=str, default=None,
                         help='Custom suffix appended to config name for experiment tracking')
     parser.add_argument('--seed', type=int, nargs='+', default=[42],
