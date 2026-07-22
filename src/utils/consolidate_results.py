@@ -27,8 +27,6 @@ def _load_json(path):
 
 def _parse_fase1(directory, modality):
     rows = []
-    for path in sorted(glob.glob(os.path.join(directory, '*_curves.json'))):
-        continue
     for path in sorted(glob.glob(os.path.join(directory, '*.json'))):
         if '_curves' in path:
             continue

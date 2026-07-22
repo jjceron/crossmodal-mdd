@@ -188,41 +188,6 @@ def create_dataloaders(subject_data, labels, subject_names,
     return folds
 
 
-def build_train_val_loaders(subject_data, labels, subject_names,
-                            train_indices, val_indices,
-                            batch_size=32, max_windows=None,
-                            num_workers=0, pin_memory=True):
-    """Build DataLoaders for given subject indices. Used by train_eeg_backbone()."""
-    train_ds = WindowDataset(subject_data, labels, subject_names,
-                             [train_indices[i] for i in range(len(train_indices))],
-                             max_windows=max_windows)
-    val_ds = WindowDataset(subject_data, labels, subject_names,
-                           [val_indices[i] for i in range(len(val_indices))],
-                           max_windows=max_windows)
-    return (
-        DataLoader(train_ds, batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory),
-        DataLoader(val_ds, batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory),
-    )
-
-
-def train_eeg_backbone(train_idx, val_idx, subject_data, labels, subject_ids,
-                       n_channels, n_samples, args,
-                       model_key='deepconvnet'):
-    """Train EEG backbone on given subject indices. Returns trained model."""
-    display_name, model_cls = MODEL_REGISTRY[model_key]
-    model = model_cls(n_channels=n_channels, n_samples=n_samples,
-                      bottleneck_dim=getattr(args, 'bottleneck_dim', None)).to(device)
-    tr_loader, vl_loader = build_train_val_loaders(
-        subject_data, labels, subject_ids,
-        train_idx, val_idx,
-        batch_size=args.bs if hasattr(args, 'bs') else 32,
-        max_windows=getattr(args, 'max_windows', None))
-    logger = ClassificationLogger()
-    best_st, _, best_vb, _ = train_window_fold(model, tr_loader, vl_loader, args, logger)
-    model.load_state_dict(best_st)
-    return model, best_vb
-
-
 # ── Training helpers ────────────────────────────────────────────────────
 
 def _logits_to_binary(logits):
@@ -546,61 +511,5 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-# ── Legacy: raw EDF loading (preserved for reference, not imported by main) ──
-# The functions below were the original data-loading pathway prior to the
-# unified cache. They are kept for reproducibility and cache regeneration.
-
-def _LEGACY_load_participants():
-    import pandas as pd
-    _EEG_DIR = 'data/raw/modma/MODMA_EEG_BIDS_format/EEG_LZU_2015_2_resting state'
-    p = pd.read_csv(f'{_EEG_DIR}/participants.tsv', sep='\t', header=None,
-                    skiprows=1, on_bad_lines='skip', engine='python')
-    return dict(zip(p[0], p[6]))
-
-
-def _LEGACY_extract_windows(data, sfreq, n_ch=64, window_size=2.0, overlap=0.5):
-    ws = int(window_size * sfreq)
-    stride = int(ws * (1 - overlap))
-    n_w = (data.shape[1] - ws) // stride + 1
-    if n_w < 1:
-        return None
-    win = np.lib.stride_tricks.sliding_window_view(
-        data[:n_ch], ws, axis=1)[:, ::stride].transpose(1, 0, 2)
-    return win[:n_w].astype(np.float32)
-
-
-def _LEGACY_load_raw_subjects(n_ch=64, random_state=42):
-    import glob
-    import mne
-    _EEG_DIR = 'data/raw/modma/MODMA_EEG_BIDS_format/EEG_LZU_2015_2_resting state'
-    sg = _LEGACY_load_participants()
-    subjects = {}
-    for sd in sorted(glob.glob(os.path.join(_EEG_DIR, 'sub-*'))):
-        sid = os.path.basename(sd)
-        if sg.get(sid) not in ('MDD', 'HC'):
-            continue
-        edf = glob.glob(os.path.join(sd, 'eeg', '*Resting-state*eeg.EDF'))
-        if not edf:
-            edf = glob.glob(os.path.join(sd, 'eeg', '*.EDF'))
-        if not edf:
-            continue
-        try:
-            raw = mne.io.read_raw_edf(edf[0], preload=True, verbose=False)
-        except Exception:
-            continue
-        data = raw.get_data()
-        if data.shape[0] < n_ch:
-            continue
-        wins = _LEGACY_extract_windows(data, int(raw.info['sfreq']), n_ch=n_ch)
-        if wins is None:
-            continue
-        if wins.shape[0] > 200:
-            idx = np.random.RandomState(random_state).choice(
-                wins.shape[0], 200, replace=False)
-            wins = wins[idx]
-        subjects[sid] = {'windows': wins, 'label': 1 if sg[sid] == 'MDD' else 0}
-    return subjects
 
 

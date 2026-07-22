@@ -168,7 +168,7 @@ def main():
     parser = argparse.ArgumentParser(
         description='FTSM channel ranking for MODMA EEG (128ch)')
     parser.add_argument('--segment-sec', type=float, default=2,
-                        help='Seconds of EEG from middle to use per subject (default: 5)')
+                        help=f'Seconds of EEG from middle to use per subject (default: 2)')
     parser.add_argument('--radius', type=int, default=50,
                         help='Sakoe-Chiba band radius (default: 50, ~10% of 500 samples)')
     parser.add_argument('--output', type=str, default=OUTPUT_PATH,
