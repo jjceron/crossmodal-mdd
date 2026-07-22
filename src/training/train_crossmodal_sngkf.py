@@ -594,17 +594,6 @@ def run_experiment(seed, args, cv_seed=None):
 
     out_dir = os.path.join(OUTPUT_DIR, cfg_name)
     os.makedirs(out_dir, exist_ok=True)
-    print(f'Device: {device}')
-    print(f'Strict Nested CrossModal — {cfg_name}')
-    print(f'  Fusion={args.fusion}  Self-attn={args.n_self_attn_layers}L')
-    print(f'  Augment={args.augment}  AugmentBackbone={args.augment_backbone}  Max windows={args.max_windows}')
-    print(f'  Adapter dim={args.adapter_dim}  Window aux={args.window_aux}  Mixup alpha={args.mixup_alpha}')
-    print(f'  Feat dropout={args.feat_dropout}  LOOCV={args.loocv}')
-    print(f'  Inner fusion folds={args.inner_folds}  (backbones re-trained per inner fold)')
-    print(f'  Backbone: lr={args.lr} wd={args.wd} epochs={args.epochs}')
-    print(f'  Fusion:   lr={args.lr_fusion} wd={args.wd_fusion} epochs={args.fusion_epochs}')
-    print(f'  Majority vote: {args.majority_vote}')
-
     _eval_fn = evaluate_fusion_majority if args.majority_vote else evaluate_fusion
 
     # Load data
@@ -627,8 +616,49 @@ def run_experiment(seed, args, cv_seed=None):
             pairs.append((eeg_id, aud_id, eeg_dict[eeg_id]['label']))
     labels = np.array([p[2] for p in pairs])
     group_ids = np.array([f'p{i}' for i in range(len(pairs))])
-    print(f'  Paired subjects: {len(pairs)} ({int(labels.sum())} MDD, {len(pairs)-int(labels.sum())} HC)')
-    print(f'  Outer CV: {"LOOCV (38 folds)" if args.loocv else "5-fold"}')
+
+    # Count parameters
+    n_eeg_ch = eeg_data[0].shape[1]
+    dummy_eeg = DeepConvNetWrapper(n_eeg_ch, N_EEG_SAMPLES)
+    dummy_aud = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES)
+    eeg_feat_dim = dummy_eeg.m.fc_features
+    aud_feat_dim = dummy_aud.m.classifier.in_features
+    dummy_fusion = CrossModalAttention(
+        eeg_feat_dim, aud_feat_dim,
+        hidden=args.hidden, n_heads=args.n_heads, dropout=args.dropout,
+        n_self_attn_layers=args.n_self_attn_layers,
+        self_attn_heads=args.self_attn_heads,
+        self_attn_dropout=args.self_attn_dropout,
+        fusion=args.fusion, feat_dropout=args.feat_dropout,
+        window_aux=args.window_aux)
+    n_eeg_p = sum(p.numel() for p in dummy_eeg.parameters())
+    n_aud_p = sum(p.numel() for p in dummy_aud.parameters())
+    n_fus_p = sum(p.numel() for p in dummy_fusion.parameters())
+    n_seeds = len(parse_seeds(args.seed)) if args.init_seed is None else len(parse_seeds(args.init_seed))
+    n_mdd_eeg = int(sum(eeg_labels))
+    n_hc_eeg = len(eeg_labels) - n_mdd_eeg
+    n_mdd_aud = int(sum(aud_labels))
+    n_hc_aud = len(aud_labels) - n_mdd_aud
+    n_mdd_paired = int(sum(labels))
+    n_hc_paired = len(labels) - n_mdd_paired
+
+    print(f'Device: {device}')
+    print(f'─── {cfg_name} ───')
+    print(f'Data:')
+    print(f'  EEG:   {len(eeg_cods)} subj ({n_mdd_eeg} MDD, {n_hc_eeg} HC)  —  {n_eeg_ch}ch x {N_EEG_SAMPLES} → {eeg_feat_dim} feats')
+    print(f'  Audio: {len(aud_cods)} subj ({n_mdd_aud} MDD, {n_hc_aud} HC)  —  {N_MELS}mel x {N_AUDIO_SAMPLES} → {aud_feat_dim} feats')
+    print(f'  Paired: {len(pairs)} ({n_mdd_paired} MDD, {n_hc_paired} HC)')
+    print(f'Config:')
+    print(f'  fusion={args.fusion}  hidden={args.hidden}  n_heads={args.n_heads}  dropout={args.dropout}')
+    print(f'  window_aux={args.window_aux}  n_self_attn={args.n_self_attn_layers}({args.self_attn_heads}h)  feat_dropout={args.feat_dropout}  max_windows={args.max_windows}')
+    print(f'Backbones:')
+    print(f'  EEG DeepConvNet:      {n_eeg_p:>8,} params')
+    print(f'  Audio ShallowConvNet: {n_aud_p:>8,} params')
+    print(f'  Fusion CrossModalAttn: {n_fus_p:>7,} params  (total: {n_eeg_p + n_aud_p + n_fus_p:,})')
+    print(f'Training:')
+    print(f'  inner_folds={args.inner_folds}  outer_folds={args.outer_folds}  seeds={n_seeds}')
+    print(f'  BB:    lr={args.lr}  wd={args.wd}  epochs={args.epochs}  patience={args.bb_patience}')
+    print(f'  Fusion: lr={args.lr_fusion}  wd={args.wd_fusion}  epochs={args.fusion_epochs}')
 
     # Outer CV
     if args.loocv:
@@ -697,8 +727,6 @@ def run_experiment(seed, args, cv_seed=None):
                 tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 eeg_model = DeepConvNetWrapper(n_bb_ch, N_EEG_SAMPLES).to(device)
-                if fi == 0 and inner_fi == 0:
-                    print(f'    EEG params: {sum(p.numel() for p in eeg_model.parameters()):,}')
                 eeg_best_st, eeg_best_vb, eeg_best_ep, _ = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
                 eeg_model.load_state_dict(eeg_best_st)
                 eeg_model.eval()
@@ -720,8 +748,6 @@ def run_experiment(seed, args, cv_seed=None):
                 tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
-                if fi == 0 and inner_fi == 0:
-                    print(f'    Audio params: {sum(p.numel() for p in aud_model.parameters()):,}')
                 aud_best_st, aud_best_vb, aud_best_ep, _ = train_backbone(aud_model, tr_ldr, vl_ldr, args)
                 aud_model.load_state_dict(aud_best_st)
                 aud_model.eval()
