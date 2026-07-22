@@ -240,10 +240,7 @@ class CrossModalAttention(nn.Module):
         return win_logits
 
     def _win_logits_post(self, z, mask):
-        win_logits = self.head(z).squeeze(-1)  # [B, K]
-        if mask is not None:
-            win_logits = win_logits.masked_fill(mask == 0, float('-inf'))
-        return win_logits
+        return self.head(z).squeeze(-1)  # [B, K], raw logits (no -inf — masking handled by caller)
 
     def forward(self, z_eeg, z_audio, mask=None, return_window=False):
         """

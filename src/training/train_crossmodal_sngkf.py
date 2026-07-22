@@ -74,8 +74,6 @@ def _load_eeg_cache(suffix='64ch'):
     data = list(c['windows'])
     labels = c['labels'].astype(int)
     cods = list(c['subject_ids'])
-    n_samples = data[0].shape[2]
-    n_ch = data[0].shape[1]
     return data, labels, cods
 
 def _load_audio_cache(path=AUDIO_CACHE):
@@ -382,7 +380,7 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
                     pre_loss = (pre_loss * mask_flat).sum() / mask_flat.sum().clamp(min=1)
                     loss = loss + args.window_aux_weight * pre_loss
                 # Post-fusion window loss (gradient flows through head → self-attn → cross_attn)
-                post_loss = crit(win_logits_post, y_win * 0.95 + 0.025)
+                post_loss = crit(win_logits_post.reshape(-1), y_win * 0.95 + 0.025)
                 post_loss = (post_loss * mask_flat).sum() / mask_flat.sum().clamp(min=1)
                 loss = loss + args.window_aux_weight * post_loss
             loss.backward()
@@ -641,18 +639,18 @@ def run_experiment(seed, args, cv_seed=None):
 
     print(f'Device: {device}')
     print(f'─── {cfg_name} ───')
-    print(f'Data:')
+    print('Data:')
     print(f'  EEG:   {len(eeg_cods)} subj ({n_mdd_eeg} MDD, {n_hc_eeg} HC)  —  {n_eeg_ch}ch x {N_EEG_SAMPLES} → {eeg_feat_dim} feats')
     print(f'  Audio: {len(aud_cods)} subj ({n_mdd_aud} MDD, {n_hc_aud} HC)  —  {N_MELS}mel x {N_AUDIO_SAMPLES} → {aud_feat_dim} feats')
     print(f'  Paired: {len(pairs)} ({n_mdd_paired} MDD, {n_hc_paired} HC)')
-    print(f'Config:')
+    print('Config:')
     print(f'  fusion={args.fusion}  hidden={args.hidden}  n_heads={args.n_heads}  dropout={args.dropout}')
     print(f'  window_aux={args.window_aux}  n_self_attn={args.n_self_attn_layers}({args.self_attn_heads}h)  feat_dropout={args.feat_dropout}  max_windows={args.max_windows}')
-    print(f'Backbones:')
+    print('Backbones:')
     print(f'  EEG DeepConvNet:      {n_eeg_p:>8,} params')
     print(f'  Audio ShallowConvNet: {n_aud_p:>8,} params')
     print(f'  Fusion CrossModalAttn: {n_fus_p:>7,} params  (total: {n_eeg_p + n_aud_p + n_fus_p:,})')
-    print(f'Training:')
+    print('Training:')
     print(f'  inner_folds={args.inner_folds}  outer_folds={args.outer_folds}  seeds={n_seeds}')
     print(f'  BB:    lr={args.lr}  wd={args.wd}  epochs={args.epochs}  patience={args.bb_patience}')
     print(f'  Fusion: lr={args.lr_fusion}  wd={args.wd_fusion}  epochs={args.fusion_epochs}')
