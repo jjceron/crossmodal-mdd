@@ -1,3 +1,5 @@
+"""ShallowConvNet (Schirrmeister et al., 2017) adapted for MODMA."""
+
 from __future__ import annotations
 
 
@@ -13,20 +15,13 @@ class ShallowConvNet(nn.Module):
         n_classes: int = 2,
         n_samples: int = 256,
         dropout: float = 0.5,
-        version: str = "2018",
     ) -> None:
         super().__init__()
- 
-        if version == "2017":
-            bias_spatial = False
-            pool = (1, 75)
-            stride = (1, 15)
-            kern = 25
-        else:
-            bias_spatial = True
-            pool = (1, 35)
-            stride = (1, 7)
-            kern = 13
+
+        bias_spatial = True
+        pool = (1, 35)
+        stride = (1, 7)
+        kern = 13
 
         self.temporal_conv = nn.Conv2d(
             in_channels=1,
