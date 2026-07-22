@@ -40,4 +40,7 @@ desktop.ini
 .idea/
 
 # Jupyter
-.ipynb_checkpoints/  
+.ipynb_checkpoints/
+
+# Skills / agent instructions (local only, not shared)
+skills/

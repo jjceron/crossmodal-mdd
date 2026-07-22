@@ -77,7 +77,7 @@ MAPPING_PATH = 'data/processed/multimodal_mapping.json'
 OUTPUT_DIR = 'outputs/results/crossmodal_nested'
 RANDOM_STATE = 42
 N_FOLDS = 5
-INNER_FUSION_FOLDS = 3
+INNER_FUSION_FOLDS = 4
 N_MELS = 64
 N_AUDIO_SAMPLES = 200
 N_EEG_SAMPLES = 500
@@ -525,7 +525,7 @@ def main():
     parser.add_argument('--hidden', type=int, default=64)
     parser.add_argument('--n-heads', type=int, default=1)
     parser.add_argument('--pooling', choices=['mean', 'cls'], default='mean')
-    parser.add_argument('--dropout', type=float, default=0.5)
+    parser.add_argument('--dropout', type=float, default=0.3)
     parser.add_argument('--bottleneck-dim', type=int, default=None)
     parser.add_argument('--max-windows', type=int, default=50)
     parser.add_argument('--lr', type=float, default=5e-4)
@@ -534,8 +534,8 @@ def main():
     parser.add_argument('--patience', type=int, default=30)
     parser.add_argument('--lr-fusion', type=float, default=5e-4)
     parser.add_argument('--wd-fusion', type=float, default=1e-3)
-    parser.add_argument('--fusion-epochs', type=int, default=150)
-    parser.add_argument('--fusion-patience', type=int, default=30)
+    parser.add_argument('--fusion-epochs', type=int, default=75)
+    parser.add_argument('--fusion-patience', type=int, default=20)
     parser.add_argument('--bs', type=int, default=8)
     parser.add_argument('--augment', action='store_true')
     parser.add_argument('--augment-backbone', action='store_true',
@@ -595,7 +595,7 @@ def run_experiment(seed, args, cv_seed=None):
     except Exception:
         git_commit = 'unknown'
 
-    cfg_name = f'mhcmattention_sngkf_seed{RANDOM_STATE}_iseed_{cv_seed}_outerf{args.outer_folds}_innerf{args.inner_folds}'
+    cfg_name = f'mhcmattn_sngkf_seed{RANDOM_STATE}'
     if args.tag is not None:
         cfg_name += f'_tag{args.tag}'
 
