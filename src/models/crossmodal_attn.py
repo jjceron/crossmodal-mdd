@@ -103,10 +103,10 @@ class SelfAttentionBlock(nn.Module):
         self.attn = nn.MultiheadAttention(dim, n_heads, dropout=dropout, batch_first=True)
         self.norm2 = nn.LayerNorm(dim)
         self.mlp = nn.Sequential(
-            nn.Linear(dim, dim * 4),
+            nn.Linear(dim, dim * 2),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(dim * 4, dim),
+            nn.Linear(dim * 2, dim),
             nn.Dropout(dropout),
         )
     def forward(self, x, mask=None):
