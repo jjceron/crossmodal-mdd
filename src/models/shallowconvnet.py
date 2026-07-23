@@ -49,9 +49,8 @@ class ShallowConvNet(nn.Module):
         x = self.temporal_conv(x)
         x = self.spatial_conv(x)
         x = self.bn(x)
-        x = torch.square(x)
         x = self.pool(x)
-        x = torch.log(torch.clamp(x, min=1e-7))
+        x = torch.nn.functional.elu(x)
         x = self.dropout(x)
         return x.flatten(start_dim=1)
 

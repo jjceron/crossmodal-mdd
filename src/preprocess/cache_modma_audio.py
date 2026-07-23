@@ -1,12 +1,13 @@
-"""Cache audio mel-spectrogram windows for fast DL training — v1.
+"""Cache audio mel-spectrogram windows for fast DL training — v2 (VAD + balanced capacity).
 
 Preprocessing pipeline:
   1. Read WAV (44.1kHz, mono) → normalize int32 to float
   2. Resample 44.1kHz → 16kHz
   3. Mel-spectrogram: 64 bands, n_fft=1024, hop=160, f_min=20, f_max=8000
   4. Amplitude to dB (top_db=80)
-  5. Sliding windows: 200 frames (~2s), 50% overlap
-  6. Concatenate across 29 WAVs per subject, cap at 200 windows
+  5. VAD: remove frames with mean dB < -55 (speech vs silence)
+  6. Sliding windows: 200 frames (~2s), 50% overlap
+  7. Concatenate across 29 WAVs per subject, cap at 500 windows
 
 Run once:
   py src/preprocess/cache_modma_audio.py
@@ -36,7 +37,8 @@ N_FFT = 1024
 HOP = 160
 N_FRAMES = 200
 OVERLAP = 0.5
-N_WINS = 200
+N_WINS = 500
+VAD_THRESHOLD = -55  # dB — frames below this are treated as silence
 RANDOM_STATE = 42
 
 
@@ -62,6 +64,32 @@ def compute_mel(wav_path):
     return torchaudio.transforms.AmplitudeToDB(top_db=80)(mel).numpy().astype(np.float32)
 
 
+def _vad_filter(mel):
+    """Filter out silent frames from a mel spectrogram.
+
+    Keeps only contiguous segments where mean frame energy >= VAD_THRESHOLD
+    and segment length >= N_FRAMES (so window extraction still works).
+
+    Args:
+        mel: (n_mels, T) ndarray in dB scale
+
+    Returns:
+        (n_mels, T') ndarray with only speech segments, or None if no valid speech.
+    """
+    frame_energy = mel.mean(axis=0)
+    is_speech = frame_energy >= VAD_THRESHOLD
+    changes = np.diff(np.concatenate(([0], is_speech.astype(np.int32), [0])))
+    starts = np.where(changes == 1)[0]
+    ends = np.where(changes == -1)[0]
+    segments = []
+    for s, e in zip(starts, ends):
+        if e - s >= N_FRAMES:
+            segments.append(mel[:, s:e])
+    if not segments:
+        return None
+    return np.concatenate(segments, axis=1)
+
+
 def main():
     df = pd.read_excel(AUDIO_XLSX).sort_values('subject id')
     y_bin = [1 if lbl == 'MDD' else 0 for lbl in df['type'].tolist()]
@@ -77,6 +105,9 @@ def main():
         all_win = []
         for wf in wavs:
             mel = compute_mel(wf)
+            if mel is None:
+                continue
+            mel = _vad_filter(mel)
             if mel is None:
                 continue
             if mel.shape[1] < N_FRAMES:
