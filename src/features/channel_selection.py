@@ -118,11 +118,27 @@ def _cohens_d(x, y):
 def main():
     print('Loading 128ch cache...')
     c = np.load(CACHE_PATH, allow_pickle=True)
-    windows = c['windows']       # (53, 335, 128, 500)
-    mask = c['window_mask']      # (53, 335)
+    raw_windows = c['windows']
     labels = c['labels']         # (53,)
-    print(f'  Shape: {windows.shape}, Subjects: {len(labels)}, '
-          f'MDD: {(labels==1).sum()}, HC: {(labels==0).sum()}')
+
+    if 'window_mask' in c:
+        windows = raw_windows          # (53, 335, 128, 500)
+        mask = c['window_mask']        # (53, 335)
+        n_max = mask.shape[1]
+        print(f'  Fixed-size cache: {windows.shape}, Subjects: {len(labels)}, '
+              f'MDD: {(labels==1).sum()}, HC: {(labels==0).sum()}')
+    else:
+        # New format: object array (53,) each of shape (n_w, 128, 500)
+        n_max = max(w.shape[0] for w in raw_windows)
+        windows_arr = np.zeros((len(raw_windows), n_max, 128, 500), dtype=np.float32)
+        mask = np.zeros((len(raw_windows), n_max), dtype=bool)
+        for i, w in enumerate(raw_windows):
+            n = w.shape[0]
+            windows_arr[i, :n] = w
+            mask[i, :n] = True
+        windows = windows_arr
+        print(f'  Object-array cache: {len(raw_windows)} subjects, max {n_max} windows, '
+              f'MDD: {(labels==1).sum()}, HC: {(labels==0).sum()}')
 
     # ── Phase 1: Spectral features ──
     print('\nExtracting band power (theta, alpha, beta) per subject...')
