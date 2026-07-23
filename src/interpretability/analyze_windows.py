@@ -120,13 +120,15 @@ def main():
     p.add_argument('--global_', action='store_true', dest='global_',
                    help='Aggregate across all folds')
     p.add_argument('--save', action='store_true', help='Save figure')
+    p.add_argument('--cache-suffix', type=str, default='64ch',
+                   help='EEG cache suffix (e.g. 64ch, mddk64). Default: 64ch')
     args = p.parse_args()
     if args.save:
         matplotlib.use('Agg')
 
     print('Loading data...')
     (eeg_data, eeg_labels, eeg_cods), (aud_data, aud_labels, aud_cods), mapping = \
-        load_eeg_cache(), load_audio_cache(), load_mapping()
+        load_eeg_cache(suffix=args.cache_suffix), load_audio_cache(), load_mapping()
     pairs, eeg_subjs, aud_subjs = build_paired_subjects(
         eeg_data, eeg_labels, eeg_cods, aud_data, aud_labels, aud_cods, mapping)
 

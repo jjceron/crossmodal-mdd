@@ -18,7 +18,7 @@ from interpretability.base import RESULTS_ROOT
 
 
 def find_experiment_dirs(tag):
-    pattern = os.path.join(RESULTS_ROOT, f'mhcmattention_sngkf_seed*_iseed_*_outerf5_innerf5_tag{tag}')
+    pattern = os.path.join(RESULTS_ROOT, f'mhcmattn_sngkf_seed*_*tag{tag}')
     dirs = sorted(glob.glob(pattern))
     if not dirs:
         print(f'No experiment dirs found for tag="{tag}"')

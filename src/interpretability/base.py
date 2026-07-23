@@ -18,13 +18,14 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 RESULTS_ROOT = os.path.join('outputs', 'results', 'crossmodal_nested')
 FIGURES_ROOT = os.path.join('outputs', 'figures')
 
-EEG_CACHE = 'data/processed/eeg_preprocessed_64ch.npz'
+EEG_CACHE_TPL = 'data/processed/eeg_preprocessed_{}.npz'
 AUDIO_CACHE = 'data/processed/audio_mel_cache.npz'
 MAPPING_PATH = 'data/processed/multimodal_mapping.json'
 
 # ── Data loading (standalone, no dep on train_crossmodal_sngkf) ──
 
-def load_eeg_cache(path=EEG_CACHE):
+def load_eeg_cache(suffix='64ch'):
+    path = EEG_CACHE_TPL.format(suffix)
     c = np.load(path, allow_pickle=True)
     data = list(c['windows'])
     labels = c['labels'].astype(int)
@@ -129,7 +130,7 @@ def extract_all_features(eeg_model, aud_model, pairs, eeg_subjs, aud_subjs, max_
 # ── Checkpoint / experiment helpers ──
 
 def find_checkpoint_dir(tag, seed):
-    pattern = os.path.join(RESULTS_ROOT, f'mhcmattention_sngkf_seed{seed}_iseed_*_outerf5_innerf5_tag{tag}')
+    pattern = os.path.join(RESULTS_ROOT, f'mhcmattn_sngkf_seed{seed}_*tag{tag}')
     dirs = sorted(glob.glob(pattern))
     if not dirs:
         raise FileNotFoundError(f'No checkpoint dir for seed={seed}, tag={tag}')
@@ -201,4 +202,6 @@ def parse_shared_args(description):
     p.add_argument('--seed', type=int, default=42, help='Seed to analyze')
     p.add_argument('--fold', type=int, default=1, help='Fold to analyze')
     p.add_argument('--save', action='store_true', help='Save figure instead of plt.show()')
+    p.add_argument('--cache-suffix', type=str, default='64ch',
+                   help='EEG cache suffix (e.g. 64ch, mddk64). Default: 64ch')
     return p.parse_args()

@@ -30,7 +30,7 @@ def main():
     # Load data
     print('Loading data...')
     (eeg_data, eeg_labels, eeg_cods), (aud_data, aud_labels, aud_cods), mapping = \
-        load_eeg_cache(), load_audio_cache(), load_mapping()
+        load_eeg_cache(suffix=args.cache_suffix), load_audio_cache(), load_mapping()
     pairs, eeg_subjs, aud_subjs = build_paired_subjects(
         eeg_data, eeg_labels, eeg_cods, aud_data, aud_labels, aud_cods, mapping)
 
