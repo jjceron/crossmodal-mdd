@@ -20,28 +20,28 @@ class ShallowConvNet(nn.Module):
 
         bias_spatial = True
         pool = (1, 35)
-        stride = (1, 7)
+        stride = (1, 11)
         kern = 13
 
         self.temporal_conv = nn.Conv2d(
             in_channels=1,
-            out_channels=24,
+            out_channels=8,
             kernel_size=(1, kern),
             padding="same",
             bias=True,
         )
         self.spatial_conv = nn.Conv2d(
-            in_channels=24,
-            out_channels=24,
+            in_channels=8,
+            out_channels=8,
             kernel_size=(n_channels, 1),
             bias=bias_spatial,
         )
-        self.bn = nn.BatchNorm2d(24, eps=1e-05, momentum=0.1)
+        self.bn = nn.BatchNorm2d(8, eps=1e-05, momentum=0.1)
         self.pool = nn.AvgPool2d(kernel_size=pool, stride=stride)
         self.dropout = nn.Dropout(dropout)
 
         t_out = (n_samples - pool[1]) // stride[1] + 1
-        in_features = 24 * t_out
+        in_features = 8 * t_out
         self.classifier = nn.Linear(in_features, n_classes)
 
     def forward_features(self, x: Tensor) -> Tensor:

@@ -2,7 +2,8 @@
 
 Original: 16→32→64→128 filters, ~136K params
 v4:        8→16→32→64  filters,  ~34K params
-v5:        4→8→16→32   filters,  ~8.5K params (reduced overfitting)
+v5:        4→8→16→32   filters,  ~8.5K params
+v6:        4→8→16→64   filters,  ~14K params  (128-d features, balanced with audio)
 """
 from __future__ import annotations
 
@@ -46,8 +47,8 @@ class DeepConvNet(nn.Module):
         )
 
         self.block4 = nn.Sequential(
-            nn.Conv2d(16, 32, (1, 10)),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(16, 64, (1, 10)),
+            nn.BatchNorm2d(64),
             nn.ELU(),
             nn.MaxPool2d((1, 3)),
             nn.Dropout2d(dropout),
