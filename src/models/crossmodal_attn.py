@@ -124,7 +124,7 @@ class CrossModalAttention(nn.Module):
                  self_attn_heads=4, self_attn_dropout=0.1,
                  fusion='cross_attn', pooling='mean', dropout=0.5,
                  adapter_dim=None, window_aux=False,
-                 feat_dropout=0.0):
+                 feat_dropout=0.0, max_windows=500):
         super().__init__()
         self.fusion = fusion
         self.pooling = pooling
@@ -176,6 +176,11 @@ class CrossModalAttention(nn.Module):
         if pooling == 'cls':
             self.cls_token = nn.Parameter(torch.randn(1, 1, hidden))
             self.pool = AttentionPool(hidden)
+
+        # Learnable window attention for pooling='attn'
+        if pooling == 'attn':
+            self.window_attn = nn.Parameter(torch.zeros(1, max_windows, 1))
+            nn.init.xavier_uniform_(self.window_attn)
 
         # Classifier head
         self.head = nn.Sequential(
@@ -285,6 +290,14 @@ class CrossModalAttention(nn.Module):
             cls = self.cls_token.expand(B, -1, -1)
             z_pooled = torch.cat([cls, z], dim=1)
             z_pooled = self.pool(z_pooled)
+        elif self.pooling == 'attn':
+            attn_w = torch.softmax(self.window_attn, dim=1)  # [1, K_max, 1]
+            attn_w = attn_w[:, :z.shape[1]]  # trim to actual K
+            if mask is not None:
+                attn_w = attn_w * mask.unsqueeze(-1)
+                attn_w = attn_w / attn_w.sum(dim=1, keepdim=True).clamp(min=1e-8)
+            self._window_pool_weights = attn_w.detach().squeeze(-1)
+            z_pooled = (z * attn_w).sum(dim=1)
 
         # Classifier
         logits = self.head(z_pooled).squeeze(-1)

@@ -511,7 +511,7 @@ def main():
     parser.add_argument('--self-attn-dropout', type=float, default=0.1)
     parser.add_argument('--hidden', type=int, default=32)
     parser.add_argument('--n-heads', type=int, default=4)
-    parser.add_argument('--pooling', choices=['mean', 'cls'], default='mean')
+    parser.add_argument('--pooling', choices=['mean', 'cls', 'attn'], default='attn')
     parser.add_argument('--dropout', type=float, default=0.6)
     parser.add_argument('--bottleneck-dim', type=int, default=64)
     parser.add_argument('--max-windows', type=int, default=50)
@@ -522,7 +522,7 @@ def main():
                         help=f'Patience for backbone early stopping (default: {BB_PATIENCE})')
     parser.add_argument('--lr-fusion', type=float, default=5e-4)
     parser.add_argument('--wd-fusion', type=float, default=5e-3)
-    parser.add_argument('--fusion-epochs', type=int, default=75)
+    parser.add_argument('--fusion-epochs', type=int, default=100)
     parser.add_argument('--fusion-patience', type=int, default=20)
     parser.add_argument('--bs', type=int, default=8)
     parser.add_argument('--augment', action='store_true')
@@ -625,7 +625,7 @@ def run_experiment(seed, args, cv_seed=None):
         self_attn_heads=args.self_attn_heads,
         self_attn_dropout=args.self_attn_dropout,
         fusion=args.fusion, feat_dropout=args.feat_dropout,
-        window_aux=args.window_aux)
+        window_aux=args.window_aux, max_windows=args.max_windows)
     n_eeg_p = sum(p.numel() for p in dummy_eeg.parameters())
     n_aud_p = sum(p.numel() for p in dummy_aud.parameters())
     n_fus_p = sum(p.numel() for p in dummy_fusion.parameters())
@@ -778,7 +778,7 @@ def run_experiment(seed, args, cv_seed=None):
                     self_attn_dropout=args.self_attn_dropout,
                     fusion=args.fusion, pooling=args.pooling, dropout=args.dropout,
                     adapter_dim=args.adapter_dim, window_aux=args.window_aux,
-                    feat_dropout=args.feat_dropout,
+                    feat_dropout=args.feat_dropout, max_windows=args.max_windows,
                 ).to(device)
 
                 fusion_model, _, fusion_best_ep, fusion_history = train_fusion_head(
@@ -815,6 +815,10 @@ def run_experiment(seed, args, cv_seed=None):
                 print(f'    >>> Inner fold {inner_fi + 1} val_bacc={inner_bacc:.3f}  best_ep={fusion_best_ep}')
                 inner_best_vbs.append(inner_bacc)
                 inner_best_eps.append(fusion_best_ep)
+                pool_attn_w = None
+                if hasattr(fusion_model, '_window_pool_weights') and fusion_model._window_pool_weights is not None:
+                    pool_attn_w = fusion_model._window_pool_weights.cpu().tolist()
+
                 inner_folds_info.append({
                     'inner_fold': inner_fi + 1,
                     'inner_val_bacc': float(inner_bacc),
@@ -823,6 +827,7 @@ def run_experiment(seed, args, cv_seed=None):
                     'eeg_backbone_subjects': eeg_bb_tr_cods,
                     'aud_backbone_subjects': aud_bb_tr_cods,
                     'attention_per_subject': attn_per_subj,
+                    'window_pool_weights': pool_attn_w,
                     'fusion_best_epoch': fusion_best_ep,
                     'fusion_history': fusion_history,
                 })
@@ -917,7 +922,7 @@ def run_experiment(seed, args, cv_seed=None):
                 self_attn_dropout=args.self_attn_dropout,
                 fusion=args.fusion, pooling=args.pooling, dropout=args.dropout,
                 adapter_dim=args.adapter_dim, window_aux=args.window_aux,
-                feat_dropout=args.feat_dropout,
+                feat_dropout=args.feat_dropout, max_windows=args.max_windows,
             ).to(device)
 
             # Train on ALL training data (no validation split)
