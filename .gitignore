@@ -12,7 +12,7 @@ venv/
 env/
 
 # Raw & processed data (large datasets — not version-controlled)
-data/
+/data/
 
 # Cache and docs
 cache/

@@ -1,17 +1,17 @@
-"""Cache preprocessed EEG windows for fast DL training — v6.
+"""Cache preprocessed EEG windows for fast DL training — v7.
 
 Preprocessing pipeline:
-  1. Bandpass filter 0.5–60 Hz
+  1. Bandpass filter 0.5–50 Hz
   2. Notch filter 50 Hz (power line)
   3. [--ica] ICA + auto-reject EOG/EMG components
-  4. Channel selection:
-        - 64: first 64 channels (0–63)
-        - 19: clinical 10-20 subset via nearest-neighbor on EGI layout
-        - 128: all 128 channels
-        - ftsm4|8|16|32|64: top-K channels from FTSM ranking
-  5. Average reference (computed on selected channels only)
-  6. 2s windows, 50% overlap
-  7. All windows retained
+  4. [--reject-threshold] Amplitude-based window rejection (µV)
+  5. Channel selection:
+         - 64: first 64 channels (0–63)
+         - 19: clinical 10-20 subset via nearest-neighbor on EGI layout
+         - 128: all 128 channels
+         - ftsm4|8|16|32|64: top-K channels from FTSM ranking
+  6. Average reference (computed on selected channels only)
+  7. 2s windows, 50% overlap
 
 Run once (unimodal benchmarks):
   py src/preprocess/cache_modma_eeg.py --channels 64
@@ -28,11 +28,14 @@ Run after FTSM ranking computed:
 With ICA cleaning:
   py src/preprocess/cache_modma_eeg.py --channels 64 --ica
 
+With ICA + amplitude rejection (recommended for clean signal):
+  py src/preprocess/cache_modma_eeg.py --channels 128 --ica --reject-threshold 150
+
 Output:
-  data/processed/eeg_preprocessed_{n_ch}ch.npz         (64, 19, 128)
-  data/processed/eeg_preprocessed_{n_ch}ch_ica.npz      (ICA-cleaned)
-  data/processed/eeg_preprocessed_ftsm{k}.npz           (FTSM subsets)
-  data/processed/eeg_preprocessed_ftsm{k}_ica.npz       (FTSM + ICA)
+  data/processed/eeg_preprocessed_{n_ch}ch.npz             (baseline)
+  data/processed/eeg_preprocessed_{n_ch}ch_ica.npz          (ICA-cleaned)
+  data/processed/eeg_preprocessed_{n_ch}ch_ica_rej.npz      (ICA + amplitude rejection)
+  data/processed/eeg_preprocessed_ftsm{k}.npz               (FTSM subsets)
 """
 import sys
 import os
@@ -202,11 +205,16 @@ def main():
                         help=f'Channel selection. Options: {_VALID_CHANNEL_ARGS}')
     parser.add_argument('--ica', action='store_true',
                         help='Apply ICA + auto-reject EOG/EMG components before channel selection')
+    parser.add_argument('--reject-threshold', type=float, default=None,
+                        help='Amplitude rejection threshold in µV (e.g. 150). '
+                             'Windows where any channel exceeds this are discarded.')
     args = parser.parse_args()
 
     n_ch, out_suffix, pick_indices = _parse_channels(args.channels)
     if args.ica:
         out_suffix += '_ica'
+    if args.reject_threshold is not None:
+        out_suffix += '_rej'
     out_path = f'data/processed/eeg_preprocessed_{out_suffix}.npz'
 
     p = pd.read_csv(PARTICIPANTS_PATH, sep='\t', header=None, skiprows=1,
@@ -243,7 +251,7 @@ def main():
         except Exception:
             continue
 
-        raw.filter(0.5, 60, verbose=False)
+        raw.filter(0.5, 50, verbose=False)
         raw.notch_filter(50, verbose=False)
 
         if args.ica:
@@ -273,6 +281,17 @@ def main():
         win = np.lib.stride_tricks.sliding_window_view(
             data, ws, axis=1)[:, ::stride].transpose(1, 0, 2)
         win = win[:n_w].astype(np.float32)
+
+        if args.reject_threshold is not None:
+            thr = args.reject_threshold * 1e-6  # µV → V
+            bad = np.any(np.abs(win) > thr, axis=(1, 2))
+            n_bad = int(bad.sum())
+            if n_bad == len(win):
+                print(f'    WARNING: all {len(win)} windows rejected (threshold={args.reject_threshold} µV)')
+                continue
+            if n_bad > 0:
+                win = win[~bad]
+            print(f'    Rejected {n_bad}/{n_bad + len(win)} windows (amp > {args.reject_threshold} µV)')
 
         all_wins.append(win)
         all_ids.append(sid)
