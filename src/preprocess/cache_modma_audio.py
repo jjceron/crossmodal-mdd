@@ -38,7 +38,7 @@ HOP = 160
 N_FRAMES = 200
 OVERLAP = 0.5
 N_WINS = 500
-VAD_THRESHOLD = -55  # dB — frames below this are treated as silence
+VAD_THRESHOLD = -60  # dB — frames below this are treated as silence
 RANDOM_STATE = 42
 
 
