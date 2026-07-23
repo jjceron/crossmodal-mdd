@@ -1,12 +1,12 @@
-"""Cache audio mel-spectrogram windows for fast DL training — v2 (VAD + balanced capacity).
+"""Cache audio mel-spectrogram windows for fast DL training — v3 (window-level VAD).
 
 Preprocessing pipeline:
   1. Read WAV (44.1kHz, mono) → normalize int32 to float
   2. Resample 44.1kHz → 16kHz
   3. Mel-spectrogram: 64 bands, n_fft=1024, hop=160, f_min=20, f_max=8000
   4. Amplitude to dB (top_db=80)
-  5. VAD: remove frames with mean dB < -55 (speech vs silence)
-  6. Sliding windows: 200 frames (~2s), 50% overlap
+  5. Sliding windows: 200 frames (~2s), 50% overlap
+  6. Window-level VAD: discard windows with mean dB < -60
   7. Concatenate across 29 WAVs per subject, cap at 500 windows
 
 Run once:
@@ -64,32 +64,6 @@ def compute_mel(wav_path):
     return torchaudio.transforms.AmplitudeToDB(top_db=80)(mel).numpy().astype(np.float32)
 
 
-def _vad_filter(mel):
-    """Filter out silent frames from a mel spectrogram.
-
-    Keeps only contiguous segments where mean frame energy >= VAD_THRESHOLD
-    and segment length >= N_FRAMES (so window extraction still works).
-
-    Args:
-        mel: (n_mels, T) ndarray in dB scale
-
-    Returns:
-        (n_mels, T') ndarray with only speech segments, or None if no valid speech.
-    """
-    frame_energy = mel.mean(axis=0)
-    is_speech = frame_energy >= VAD_THRESHOLD
-    changes = np.diff(np.concatenate(([0], is_speech.astype(np.int32), [0])))
-    starts = np.where(changes == 1)[0]
-    ends = np.where(changes == -1)[0]
-    segments = []
-    for s, e in zip(starts, ends):
-        if e - s >= N_FRAMES:
-            segments.append(mel[:, s:e])
-    if not segments:
-        return None
-    return np.concatenate(segments, axis=1)
-
-
 def main():
     df = pd.read_excel(AUDIO_XLSX).sort_values('subject id')
     y_bin = [1 if lbl == 'MDD' else 0 for lbl in df['type'].tolist()]
@@ -107,9 +81,6 @@ def main():
             mel = compute_mel(wf)
             if mel is None:
                 continue
-            mel = _vad_filter(mel)
-            if mel is None:
-                continue
             if mel.shape[1] < N_FRAMES:
                 continue
             stride = int(N_FRAMES * (1 - OVERLAP))
@@ -122,6 +93,10 @@ def main():
         if not all_win:
             continue
         all_win = np.concatenate(all_win, axis=0)
+        win_energy = all_win.mean(axis=(1, 2))
+        keep = win_energy >= VAD_THRESHOLD
+        if keep.any():
+            all_win = all_win[keep]
         if all_win.shape[0] > N_WINS:
             rng = np.random.RandomState(RANDOM_STATE)
             idx = rng.choice(all_win.shape[0], N_WINS, replace=False)
