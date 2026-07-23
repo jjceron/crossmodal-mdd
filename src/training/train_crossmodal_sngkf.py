@@ -58,7 +58,7 @@ MAPPING_PATH = 'data/processed/multimodal_mapping.json'
 OUTPUT_DIR = 'outputs/results/crossmodal_nested'
 RANDOM_STATE = 42
 N_FOLDS = 5
-INNER_FUSION_FOLDS = 10
+INNER_FUSION_FOLDS = 5
 BB_PATIENCE = 40
 BB_EPOCHS = 300
 N_MELS = 64
@@ -513,7 +513,7 @@ def main():
     parser.add_argument('--n-heads', type=int, default=4)
     parser.add_argument('--pooling', choices=['mean', 'cls'], default='mean')
     parser.add_argument('--dropout', type=float, default=0.6)
-    parser.add_argument('--bottleneck-dim', type=int, default=None)
+    parser.add_argument('--bottleneck-dim', type=int, default=64)
     parser.add_argument('--max-windows', type=int, default=50)
     parser.add_argument('--lr', type=float, default=3e-4)
     parser.add_argument('--wd', type=float, default=1e-3)
