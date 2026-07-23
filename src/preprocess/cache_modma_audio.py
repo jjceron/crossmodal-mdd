@@ -133,7 +133,7 @@ def main():
 
     os.makedirs('data/processed', exist_ok=True)
     out = {
-        'windows': np.array(all_wins_list),
+        'windows': np.array(all_wins_list, dtype=object),
         'subject_ids': np.array(all_ids),
         'labels': np.array(all_labels, dtype=np.int32),
     }
