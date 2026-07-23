@@ -84,14 +84,22 @@ class CrossModalFusion(nn.Module):
         if mask is not None:
             attn = attn.masked_fill(mask.unsqueeze(1).unsqueeze(2) == 0, float('-inf'))
         attn = torch.softmax(attn, dim=-1)
+        # Entropy over keys (dim=-1) for regularization
+        ent = -(attn * torch.log(attn.clamp(min=1e-8))).sum(dim=-1)  # [B, n_heads, L]
+        if mask is not None:
+            ent = ent * mask.unsqueeze(1)
+            ent = ent.sum() / mask.unsqueeze(1).sum().clamp(min=1)
+        else:
+            ent = ent.mean()
         out = (attn @ v).transpose(1, 2).contiguous().view(B, L, self.dim)
-        return o_proj(out), attn.detach()
+        return o_proj(out), attn.detach(), ent
 
     def forward(self, eeg, audio, mask=None):
-        e_out, e_attn = self._attend(self.e_q(eeg), self.a_k(audio), self.a_v(audio), self.e_o, mask)
+        e_out, e_attn, e_ent = self._attend(self.e_q(eeg), self.a_k(audio), self.a_v(audio), self.e_o, mask)
         eeg = self.norm_e(eeg + e_out)
-        a_out, a_attn = self._attend(self.a_q(audio), self.e_k(eeg), self.e_v(eeg), self.a_o, mask)
+        a_out, a_attn, a_ent = self._attend(self.a_q(audio), self.e_k(eeg), self.e_v(eeg), self.a_o, mask)
         audio = self.norm_a(audio + a_out)
+        self._attn_entropy = (e_ent + a_ent) / 2
         return eeg, audio, (e_attn, a_attn)
 
 

@@ -348,11 +348,11 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
     logger = ClassificationLogger()
     logger.log_header()
     history = {k: [] for k in ('train_loss', 'val_loss', 'train_acc', 'val_acc',
-                                'val_bacc', 'val_f1', 'val_sens', 'val_spec')}
+                                'val_bacc', 'val_f1', 'val_sens', 'val_spec', 'entropy')}
 
     for ep in range(1, args.fusion_epochs + 1):
         model.train()
-        tr_loss, tr_n = 0.0, 0
+        tr_loss, tr_n, tr_ent, ent_n = 0.0, 0, 0.0, 0
         tr_logits, tr_labels = [], []
         for ze, za, m, yb in tr_ldr:
             ze, za, m, yb = ze.to(device), za.to(device), m.to(device), yb.to(device)
@@ -383,13 +383,23 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
                 post_loss = crit(win_logits_post.reshape(-1), y_win * 0.95 + 0.025)
                 post_loss = (post_loss * mask_flat).sum() / mask_flat.sum().clamp(min=1)
                 loss = loss + args.window_aux_weight * post_loss
+            # Attention entropy regularization
+            if args.entropy_lambda > 0 and hasattr(model, 'cross') and hasattr(model.cross, '_attn_entropy'):
+                ent = model.cross._attn_entropy
+                loss = loss + args.entropy_lambda * ent
+                cur_ent = ent.item()
+            else:
+                cur_ent = 0.0
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             opt.step()
             tr_loss += loss.item() * yb.size(0)
             tr_n += yb.size(0)
+            tr_ent += cur_ent * yb.size(0)
+            ent_n += yb.size(0)
             tr_logits.append(logits.detach())
         tr_loss /= tr_n
+        tr_ent = tr_ent / ent_n if ent_n > 0 else 0.0
         tr_pred = (torch.sigmoid(torch.cat(tr_logits)).cpu().numpy() >= 0.5).astype(int)
         tr_true = torch.cat(tr_labels).cpu().numpy()
         tr_m = logger.metrics(tr_true, tr_pred)
@@ -414,6 +424,7 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
         history['val_acc'].append(vl_m['acc'])
         for k in ('bacc', 'f1', 'sens', 'spec'):
             history[f'val_{k}'].append(vl_m[k])
+        history['entropy'].append(float(tr_ent))
 
         if vl_loss < best_vl:
             best_vl = vl_loss
@@ -506,14 +517,14 @@ def build_backbone_dataset(eeg_dict, aud_dict, mapping, train_paired_ids):
 def main():
     parser = argparse.ArgumentParser(description='Strict nested cross-modal training (no fusion validation leakage)')
     parser.add_argument('--fusion', choices=['concat', 'gating', 'cross_attn'], default='cross_attn')
-    parser.add_argument('--n-self-attn-layers', type=int, default=1)
-    parser.add_argument('--self-attn-heads', type=int, default=4)
+    parser.add_argument('--n-self-attn-layers', type=int, default=0)
+    parser.add_argument('--self-attn-heads', type=int, default=2)
     parser.add_argument('--self-attn-dropout', type=float, default=0.1)
-    parser.add_argument('--hidden', type=int, default=32)
-    parser.add_argument('--n-heads', type=int, default=4)
-    parser.add_argument('--pooling', choices=['mean', 'cls', 'attn'], default='attn')
+    parser.add_argument('--hidden', type=int, default=64)
+    parser.add_argument('--n-heads', type=int, default=2)
+    parser.add_argument('--pooling', choices=['mean', 'cls', 'attn'], default='mean')
     parser.add_argument('--dropout', type=float, default=0.6)
-    parser.add_argument('--bottleneck-dim', type=int, default=64)
+    parser.add_argument('--bottleneck-dim', type=int, default=None)
     parser.add_argument('--max-windows', type=int, default=50)
     parser.add_argument('--lr', type=float, default=3e-4)
     parser.add_argument('--wd', type=float, default=1e-3)
@@ -523,7 +534,9 @@ def main():
     parser.add_argument('--lr-fusion', type=float, default=5e-4)
     parser.add_argument('--wd-fusion', type=float, default=5e-3)
     parser.add_argument('--fusion-epochs', type=int, default=100)
-    parser.add_argument('--fusion-patience', type=int, default=20)
+    parser.add_argument('--fusion-patience', type=int, default=30)
+    parser.add_argument('--entropy-lambda', type=float, default=0.03,
+                        help='Attention entropy regularization weight (0=disabled)')
     parser.add_argument('--bs', type=int, default=8)
     parser.add_argument('--augment', action='store_true')
     parser.add_argument('--augment-backbone', action='store_true',
@@ -1110,6 +1123,7 @@ def run_experiment(seed, args, cv_seed=None):
                     'fusion_wd': args.wd_fusion,
                     'fusion_epochs': args.fusion_epochs,
                     'fusion_patience': args.fusion_patience,
+                    'entropy_lambda': args.entropy_lambda,
                     'batch_size': args.bs,
                     'backbone_eeg': 'DeepConvNet',
                     'backbone_aud': 'ShallowConvNet',
@@ -1221,6 +1235,7 @@ def run_experiment(seed, args, cv_seed=None):
                 'fusion_wd': args.wd_fusion,
                 'fusion_epochs': args.fusion_epochs,
                 'fusion_patience': args.fusion_patience,
+                'entropy_lambda': args.entropy_lambda,
                 'batch_size': args.bs,
                 'backbone_eeg': 'DeepConvNet',
                 'backbone_aud': 'ShallowConvNet',
