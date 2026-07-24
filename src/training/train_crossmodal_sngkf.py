@@ -743,7 +743,7 @@ def run_experiment(seed, args, cv_seed=None):
                 del tr_ds, vl_ds, tr_ldr, vl_ldr
 
                 # ── Train clean audio backbone (proper validation split) ──
-                print('    --- Training clean Audio backbone...')
+                print('    Training clean Audio backbone...')
                 n_bb = len(aud_bb_tr_labels)
                 sss = StratifiedShuffleSplit(n_splits=1, test_size=min(4, max(1, n_bb // 6)),
                                              random_state=inner_seed + 888)
@@ -795,6 +795,7 @@ def run_experiment(seed, args, cv_seed=None):
                     feat_dropout=args.feat_dropout, max_windows=args.max_windows,
                 ).to(device)
 
+                print('    Training fusion head...')
                 fusion_model, _, fusion_best_ep, fusion_history = train_fusion_head(
                     fusion_model,
                     Z_e_tr, Z_a_tr, mask_tr, y_inner_tr,
