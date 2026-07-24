@@ -208,13 +208,19 @@ def main():
     parser.add_argument('--reject-threshold', type=float, default=None,
                         help='Amplitude rejection threshold in µV (e.g. 150). '
                              'Windows where any channel exceeds this are discarded.')
+    parser.add_argument('--suffix', type=str, default=None,
+                        help='Override output suffix (e.g. "128ch_bp50"). '
+                             'When set, --ica and --reject-threshold are NOT auto-appended.')
     args = parser.parse_args()
 
     n_ch, out_suffix, pick_indices = _parse_channels(args.channels)
-    if args.ica:
-        out_suffix += '_ica'
-    if args.reject_threshold is not None:
-        out_suffix += '_rej'
+    if args.suffix:
+        out_suffix = args.suffix
+    else:
+        if args.ica:
+            out_suffix += '_ica'
+        if args.reject_threshold is not None:
+            out_suffix += '_rej'
     out_path = f'data/processed/eeg_preprocessed_{out_suffix}.npz'
 
     p = pd.read_csv(PARTICIPANTS_PATH, sep='\t', header=None, skiprows=1,
