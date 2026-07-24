@@ -1,4 +1,4 @@
-"""Multi-modal fusion: project, fuse, self-attend, pool, classify.
+"""Multi-modal fusion: project, self-attend (intra-modal), fuse (cross-attn), pool, classify.
 
 Usage:
   model = CrossModalAttention(eeg_dim, aud_dim, fusion='cross_attn')
@@ -194,10 +194,13 @@ class CrossModalAttention(nn.Module):
         self.head = nn.Linear(hidden, 1)
 
     def _encode(self, z_eeg, z_audio, mask=None):
-        """Shared encoding: adapter → bottleneck → proj → fusion → self-attn.
+        """Shared encoding: adapter → bottleneck → proj → self-attn (intra-modal) → fusion.
+
+        Intra-modal self-attention contextualizes windows within each modality
+        before cross-modal fusion between EEG and Audio.
 
         Returns:
-            z: [B, K, hidden] — per-window features after self-attention
+            z: [B, K, hidden] — per-window features after fusion
         """
         if hasattr(self, 'eeg_adapter'):
             z_eeg = self.eeg_adapter(z_eeg)
@@ -216,6 +219,12 @@ class CrossModalAttention(nn.Module):
             e = self.feat_drop(e)
             a = self.feat_drop(a)
 
+        # Intra-modal self-attention before cross-modal fusion
+        attn_mask = (mask == 0) if mask is not None else None
+        for layer in self.self_attn_layers:
+            e = layer(e, mask=attn_mask)
+            a = layer(a, mask=attn_mask)
+
         if self.fusion == 'concat':
             z = self.concat_proj(torch.cat([e, a], dim=-1))
         elif self.fusion == 'gating':
@@ -224,10 +233,6 @@ class CrossModalAttention(nn.Module):
         elif self.fusion == 'cross_attn':
             e_out, a_out, self._attn_weights = self.cross(e, a, mask)
             z = (e_out + a_out) / 2
-
-        attn_mask = (mask == 0) if mask is not None else None
-        for layer in self.self_attn_layers:
-            z = layer(z, mask=attn_mask)
 
         return z
 
