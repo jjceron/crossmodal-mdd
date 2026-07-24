@@ -733,8 +733,8 @@ def run_experiment(seed, args, cv_seed=None):
                 vl_ds = WindowDataset(eeg_bb_tr_data, eeg_bb_tr_labels, eeg_bb_tr_cods,
                                       bb_vl_i.tolist(),
                                       max_windows=args.max_windows, seed=inner_seed)
-                tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
-                vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
+                tr_ldr = DataLoader(tr_ds, batch_size=128, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
+                vl_ldr = DataLoader(vl_ds, batch_size=128, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 eeg_model = DeepConvNetWrapper(n_bb_ch, N_EEG_SAMPLES).to(device)
                 eeg_best_st, eeg_best_vb, eeg_best_ep, _ = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
                 eeg_model.load_state_dict(eeg_best_st)
@@ -754,8 +754,8 @@ def run_experiment(seed, args, cv_seed=None):
                 vl_ds = WindowDataset(aud_bb_tr_data, aud_bb_tr_labels, aud_bb_tr_cods,
                                       bb_vl_i.tolist(),
                                       max_windows=args.max_windows, seed=inner_seed)
-                tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
-                vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
+                tr_ldr = DataLoader(tr_ds, batch_size=128, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
+                vl_ldr = DataLoader(vl_ds, batch_size=128, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
                 aud_best_st, aud_best_vb, aud_best_ep, _ = train_backbone(aud_model, tr_ldr, vl_ldr, args)
                 aud_model.load_state_dict(aud_best_st)
