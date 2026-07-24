@@ -523,7 +523,7 @@ def main():
     parser.add_argument('--pooling', choices=['mean', 'cls', 'attn'], default='mean')
     parser.add_argument('--dropout', type=float, default=0.6)
     parser.add_argument('--bottleneck-dim', type=int, default=None)
-    parser.add_argument('--max-windows', type=int, default=50)
+    parser.add_argument('--max-windows', type=int, default=1000)
     parser.add_argument('--lr', type=float, default=3e-4)
     parser.add_argument('--wd', type=float, default=1e-3)
     parser.add_argument('--epochs', type=int, default=BB_EPOCHS)
