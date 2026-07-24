@@ -18,6 +18,7 @@ from interpretability.base import (
     load_eeg_cache, load_audio_cache, load_mapping,
     build_paired_subjects, build_models, load_checkpoint,
     find_checkpoint_dir, extract_all_features,
+    load_inner_checkpoints, build_ensemble_models,
     device, FIGURES_ROOT, parse_shared_args
 )
 

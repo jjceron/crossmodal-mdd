@@ -269,7 +269,7 @@ def _load_crossmodal_nested(args):
             hist = inf.get(hist_key, {})
             folds_data.append({
                 'fold': f'{ofi}.{ifi}',
-                'history': hist,
+                hist_key: hist,
                 'test_metrics': fd.get('test_metrics', {}),
                 'test_cm': fd.get('test_cm', []),
                 'test_roc': fd.get('test_roc', {}),
