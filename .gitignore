@@ -44,3 +44,6 @@ desktop.ini
 
 # Skills / agent instructions (local only, not shared)
 skills/
+
+# ignore logs/
+logs/
