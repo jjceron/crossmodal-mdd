@@ -251,7 +251,7 @@ def train_backbone(model, train_loader, val_loader, args):
             history[f'val_{k}'].append(vl_m[k])
         history['lr'].append(float(current_lr))
 
-        if vl_m['bacc'] > best_vb:
+        if ep >= 5 and vl_m['bacc'] > best_vb:
             best_vb = vl_m['bacc']
             best_st = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             best_ep = ep
@@ -344,7 +344,7 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
     n_hc = len(y_tr) - n_mdd
     pos_weight = torch.tensor([n_hc / max(n_mdd, 1)]).to(device)
     crit = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-    best_vl, best_st, pat, best_ep = float('inf'), None, 0, 0
+    best_vb, best_st, pat, best_ep = 0.0, None, 0, 0
     logger = ClassificationLogger()
     logger.log_header()
     history = {k: [] for k in ('train_loss', 'val_loss', 'train_acc', 'val_acc',
@@ -374,16 +374,13 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
                 K = ze.shape[1]
                 y_win = yb.unsqueeze(1).expand(-1, K).reshape(-1)
                 mask_flat = m.reshape(-1)
-                # Pre-fusion window loss (from WinClassifier, before cross-attn)
                 if win_logits_pre is not None:
                     pre_loss = crit(win_logits_pre, y_win * 0.95 + 0.025)
                     pre_loss = (pre_loss * mask_flat).sum() / mask_flat.sum().clamp(min=1)
                     loss = loss + args.window_aux_weight * pre_loss
-                # Post-fusion window loss (gradient flows through head → self-attn → cross_attn)
                 post_loss = crit(win_logits_post.reshape(-1), y_win * 0.95 + 0.025)
                 post_loss = (post_loss * mask_flat).sum() / mask_flat.sum().clamp(min=1)
                 loss = loss + args.window_aux_weight * post_loss
-            # Attention entropy regularization
             if args.entropy_lambda > 0 and hasattr(model, 'cross') and hasattr(model.cross, '_attn_entropy'):
                 ent = model.cross._attn_entropy
                 loss = loss + args.entropy_lambda * ent
@@ -426,8 +423,9 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
             history[f'val_{k}'].append(vl_m[k])
         history['entropy'].append(float(tr_ent))
 
-        if vl_loss < best_vl:
-            best_vl = vl_loss
+        # Select best epoch by val_bacc (not loss), with warm-up to avoid ep-1 spurious minima
+        if ep >= 5 and vl_m['bacc'] > best_vb:
+            best_vb = vl_m['bacc']
             best_st = copy.deepcopy(model.state_dict())
             best_ep = ep
             pat = 0
@@ -442,7 +440,7 @@ def train_fusion_head(model, Z_e_tr, Z_a_tr, mask_tr, y_tr,
 
     if best_st is not None:
         model.load_state_dict(best_st)
-    return model, best_vl, best_ep, history
+    return model, best_vb, best_ep, history
 
 # ── Mixup ──
 
