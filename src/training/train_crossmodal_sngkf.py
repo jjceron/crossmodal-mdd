@@ -736,7 +736,7 @@ def run_experiment(seed, args, cv_seed=None):
                 tr_ldr = DataLoader(tr_ds, batch_size=128, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 vl_ldr = DataLoader(vl_ds, batch_size=128, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 eeg_model = DeepConvNetWrapper(n_bb_ch, N_EEG_SAMPLES).to(device)
-                eeg_best_st, eeg_best_vb, eeg_best_ep, _ = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
+                eeg_best_st, eeg_best_vb, eeg_best_ep, eeg_history = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
                 eeg_model.load_state_dict(eeg_best_st)
                 eeg_model.eval()
                 print(f'    EEG backbone done: val_bacc={eeg_best_vb:.3f} best_ep={eeg_best_ep}')
@@ -757,7 +757,7 @@ def run_experiment(seed, args, cv_seed=None):
                 tr_ldr = DataLoader(tr_ds, batch_size=128, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 vl_ldr = DataLoader(vl_ds, batch_size=128, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
                 aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
-                aud_best_st, aud_best_vb, aud_best_ep, _ = train_backbone(aud_model, tr_ldr, vl_ldr, args)
+                aud_best_st, aud_best_vb, aud_best_ep, aud_history = train_backbone(aud_model, tr_ldr, vl_ldr, args)
                 aud_model.load_state_dict(aud_best_st)
                 aud_model.eval()
                 print(f'    Audio backbone done: val_bacc={aud_best_vb:.3f} best_ep={aud_best_ep}')
@@ -845,6 +845,8 @@ def run_experiment(seed, args, cv_seed=None):
                     'window_pool_weights': pool_attn_w,
                     'fusion_best_epoch': fusion_best_ep,
                     'fusion_history': fusion_history,
+                    'eeg_backbone_history': eeg_history,
+                    'aud_backbone_history': aud_history,
                 })
 
                 # Save model states for ensemble evaluation

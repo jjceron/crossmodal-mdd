@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from interpretability.base import (
     load_eeg_cache, load_audio_cache, load_mapping,
-    build_paired_subjects, build_models, load_checkpoint,
+    build_paired_subjects, build_models, load_inner_checkpoints, build_ensemble_models,
     find_checkpoint_dir, encode_eeg, encode_audio,
     device, FIGURES_ROOT
 )
@@ -145,11 +145,16 @@ def main():
             labels = [p[2] for p in sub_pairs]
             print(f'  Fold {fi}: {len(test_indices)} subjects')
 
-            ckpt = load_checkpoint(args.tag, args.seed, fi)
-            eeg_model, aud_model, fusion_model = build_models(ckpt)
+            inner_ckpts = load_inner_checkpoints(args.tag, args.seed, fi)
+            eeg_models, aud_models, fusion_models = build_ensemble_models(inner_ckpts)
 
-            logits, _ = _get_window_logits(eeg_model, aud_model, fusion_model,
-                                           sub_pairs, eeg_subjs, aud_subjs)
+            n_subj = len(sub_pairs)
+            ens_logits = [[] for _ in range(n_subj)]
+            for em, am, fm in zip(eeg_models, aud_models, fusion_models):
+                logits, _ = _get_window_logits(em, am, fm, sub_pairs, eeg_subjs, aud_subjs)
+                for si in range(n_subj):
+                    ens_logits[si].append(logits[si])
+            logits = [np.mean(sl, axis=0) for sl in ens_logits]
             all_logits.extend(logits)
             all_labels.extend(labels)
 
@@ -166,11 +171,17 @@ def main():
         labels = [p[2] for p in sub_pairs]
         print(f'  Fold {fi}: {len(test_indices)} subjects')
 
-        ckpt = load_checkpoint(args.tag, args.seed, fi)
-        eeg_model, aud_model, fusion_model = build_models(ckpt)
+        inner_ckpts = load_inner_checkpoints(args.tag, args.seed, fi)
+        eeg_models, aud_models, fusion_models = build_ensemble_models(inner_ckpts)
 
-        all_logits, all_labels = _get_window_logits(eeg_model, aud_model, fusion_model,
-                                                     sub_pairs, eeg_subjs, aud_subjs)
+        n_subj = len(sub_pairs)
+        ens_logits = [[] for _ in range(n_subj)]
+        for em, am, fm in zip(eeg_models, aud_models, fusion_models):
+            logits, _ = _get_window_logits(em, am, fm, sub_pairs, eeg_subjs, aud_subjs)
+            for si in range(n_subj):
+                ens_logits[si].append(logits[si])
+        all_logits = [np.mean(sl, axis=0) for sl in ens_logits]
+        all_labels = labels
         title_suffix = f'seed={args.seed} fold={fi}'
 
     fig = _plot(all_logits, all_labels, title_suffix)

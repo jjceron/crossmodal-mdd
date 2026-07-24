@@ -141,6 +141,23 @@ def load_checkpoint(tag, seed, fold):
     ckpt_path = os.path.join(ckpt_dir, 'checkpoints', f'fold_{fold}.pt')
     return torch.load(ckpt_path, map_location='cpu', weights_only=False)
 
+def load_inner_checkpoints(tag, seed, fold, n_inner=5):
+    ckpt_dir = find_checkpoint_dir(tag, seed)
+    ckpts = []
+    for i in range(1, n_inner + 1):
+        path = os.path.join(ckpt_dir, 'checkpoints', f'fold{fold}_inner{i}.pt')
+        ckpts.append(torch.load(path, map_location='cpu', weights_only=False))
+    return ckpts
+
+def build_ensemble_models(inner_ckpts):
+    eeg_models, aud_models, fusion_models = [], [], []
+    for ckpt in inner_ckpts:
+        e, a, f = build_models(ckpt)
+        eeg_models.append(e)
+        aud_models.append(a)
+        fusion_models.append(f)
+    return eeg_models, aud_models, fusion_models
+
 def build_paired_subjects(eeg_data, eeg_labels, eeg_cods,
                           aud_data, aud_labels, aud_cods, mapping):
     rev = {v: k for k, v in mapping.items()}

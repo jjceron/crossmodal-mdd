@@ -34,9 +34,6 @@ def main():
     pairs, eeg_subjs, aud_subjs = build_paired_subjects(
         eeg_data, eeg_labels, eeg_cods, aud_data, aud_labels, aud_cods, mapping)
 
-    ckpt = load_checkpoint(args.tag, args.seed, args.fold)
-    eeg_model, aud_model, fusion_model = build_models(ckpt)
-
     ckpt_dir = find_checkpoint_dir(args.tag, args.seed)
     with open(os.path.join(ckpt_dir, 'results.json')) as f:
         results = json.load(f)
@@ -49,23 +46,31 @@ def main():
 
     print(f'  Test subjects: {len(test_indices)}')
 
-    Z_e, Z_a, masks = extract_all_features(eeg_model, aud_model, sub_pairs, eeg_subjs, aud_subjs)
+    inner_ckpts = load_inner_checkpoints(args.tag, args.seed, args.fold)
+    eeg_models, aud_models, fusion_models = build_ensemble_models(inner_ckpts)
 
-    print('Running forward pass...')
-    t_e = torch.FloatTensor(Z_e).to(device)
-    t_a = torch.FloatTensor(Z_a).to(device)
-    t_m = torch.FloatTensor(masks).to(device)
+    print('Running forward pass (ensemble of %d inner models)...' % len(inner_ckpts))
+    all_e_attn, all_a_attn = [], []
+    for em, am, fm in zip(eeg_models, aud_models, fusion_models):
+        Z_e, Z_a, masks = extract_all_features(em, am, sub_pairs, eeg_subjs, aud_subjs)
+        t_e = torch.FloatTensor(Z_e).to(device)
+        t_a = torch.FloatTensor(Z_a).to(device)
+        t_m = torch.FloatTensor(masks).to(device)
+        with torch.no_grad():
+            fm(t_e, t_a, t_m)
+            e_attn, a_attn = fm._attn_weights
+        all_e_attn.append(e_attn.cpu())
+        all_a_attn.append(a_attn.cpu())
 
-    with torch.no_grad():
-        fusion_model(t_e, t_a, t_m)
-        e_attn, a_attn = fusion_model._attn_weights
+    e_attn = torch.stack(all_e_attn).mean(dim=0).to(device)
+    a_attn = torch.stack(all_a_attn).mean(dim=0).to(device)
 
     B, n_heads, K, _ = e_attn.shape
+    masks_np = masks
 
     # Average over heads, keep mask
     e_attn_mean = e_attn.mean(dim=1).cpu().numpy()
     a_attn_mean = a_attn.mean(dim=1).cpu().numpy()
-    masks_np = masks
 
     # ── FIGURE 1: Aggregate attention matrices (average across subjects) ──
     # Compute subject-level average over valid windows only

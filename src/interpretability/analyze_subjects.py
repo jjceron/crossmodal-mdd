@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from interpretability.base import (
     load_eeg_cache, load_audio_cache, load_mapping,
-    build_paired_subjects, build_models, load_checkpoint,
+    build_paired_subjects, build_models, load_inner_checkpoints, build_ensemble_models,
     find_checkpoint_dir, extract_all_features,
     device, FIGURES_ROOT
 )
@@ -85,17 +85,20 @@ def main():
 
         print(f'  Fold {fi}: {len(test_indices)} test subjects')
 
-        ckpt = load_checkpoint(args.tag, args.seed, fi)
-        eeg_model, aud_model, fusion_model = build_models(ckpt)
+        inner_ckpts = load_inner_checkpoints(args.tag, args.seed, fi)
+        eeg_models, aud_models, fusion_models = build_ensemble_models(inner_ckpts)
 
-        Z_e, Z_a, masks = extract_all_features(eeg_model, aud_model, sub_pairs, eeg_subjs, aud_subjs)
+        all_logits_ens = []
+        for em, am, fm in zip(eeg_models, aud_models, fusion_models):
+            Z_e, Z_a, masks = extract_all_features(em, am, sub_pairs, eeg_subjs, aud_subjs)
+            t_e = torch.FloatTensor(Z_e).to(device)
+            t_a = torch.FloatTensor(Z_a).to(device)
+            t_m = torch.FloatTensor(masks).to(device)
+            with torch.no_grad():
+                logits = fm(t_e, t_a, t_m).cpu().numpy()
+            all_logits_ens.append(logits)
 
-        t_e = torch.FloatTensor(Z_e).to(device)
-        t_a = torch.FloatTensor(Z_a).to(device)
-        t_m = torch.FloatTensor(masks).to(device)
-
-        with torch.no_grad():
-            logits = fusion_model(t_e, t_a, t_m).cpu().numpy()
+        logits = np.mean(all_logits_ens, axis=0)
 
         all_logits.extend(logits.tolist())
         all_labels.extend(labels.tolist())

@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from interpretability.base import (
     load_eeg_cache, load_audio_cache, load_mapping,
-    build_paired_subjects, build_models, load_checkpoint,
+    build_paired_subjects, build_models, load_inner_checkpoints, build_ensemble_models,
     find_checkpoint_dir, extract_all_features,
     device, FIGURES_ROOT
 )
@@ -26,11 +26,14 @@ from sklearn.metrics import balanced_accuracy_score, roc_auc_score, f1_score
 
 
 @torch.no_grad()
-def evaluate(fusion_model, Z_e, Z_a, masks, labels):
+def _get_logits(fusion_model, Z_e, Z_a, masks):
     t_e = torch.FloatTensor(Z_e).to(device)
     t_a = torch.FloatTensor(Z_a).to(device)
     t_m = torch.FloatTensor(masks).to(device)
-    logits = fusion_model(t_e, t_a, t_m).cpu().numpy()
+    return fusion_model(t_e, t_a, t_m).cpu().numpy().flatten()
+
+
+def _metrics_from_logits(logits, labels):
     preds = (logits > 0).astype(int)
     bacc = balanced_accuracy_score(labels, preds)
     auc = roc_auc_score(labels, logits) if len(np.unique(labels)) > 1 else 0.5
@@ -43,20 +46,25 @@ def _run_ablation(tag, seed, fi, pairs, eeg_subjs, aud_subjs, test_subj_ids):
     sub_pairs = [pairs[i] for i in test_indices]
     test_labels = np.array([p[2] for p in sub_pairs])
 
-    ckpt = load_checkpoint(tag, seed, fi)
-    eeg_model, aud_model, fusion_model = build_models(ckpt)
+    inner_ckpts = load_inner_checkpoints(tag, seed, fi)
+    eeg_models, aud_models, fusion_models = build_ensemble_models(inner_ckpts)
 
-    Z_e, Z_a, masks = extract_all_features(eeg_model, aud_model, sub_pairs, eeg_subjs, aud_subjs)
+    all_logits_f, all_logits_e, all_logits_a = [], [], []
+    for em, am, fm in zip(eeg_models, aud_models, fusion_models):
+        Z_e, Z_a, masks = extract_all_features(em, am, sub_pairs, eeg_subjs, aud_subjs)
+        all_logits_f.append(_get_logits(fm, Z_e, Z_a, masks))
+        all_logits_e.append(_get_logits(fm, Z_e, np.zeros_like(Z_a), masks))
+        all_logits_a.append(_get_logits(fm, np.zeros_like(Z_e), Z_a, masks))
 
-    bacc_f, auc_f, f1_f = evaluate(fusion_model, Z_e, Z_a, masks, test_labels)
-    bacc_e, auc_e, f1_e = evaluate(fusion_model, Z_e, np.zeros_like(Z_a), masks, test_labels)
-    bacc_a, auc_a, f1_a = evaluate(fusion_model, np.zeros_like(Z_e), Z_a, masks, test_labels)
+    logits_f = np.mean(all_logits_f, axis=0)
+    logits_e = np.mean(all_logits_e, axis=0)
+    logits_a = np.mean(all_logits_a, axis=0)
 
     return {
         'fold': fi,
-        'fusion': (bacc_f, auc_f, f1_f),
-        'eeg': (bacc_e, auc_e, f1_e),
-        'audio': (bacc_a, auc_a, f1_a),
+        'fusion': _metrics_from_logits(logits_f, test_labels),
+        'eeg': _metrics_from_logits(logits_e, test_labels),
+        'audio': _metrics_from_logits(logits_a, test_labels),
     }
 
 

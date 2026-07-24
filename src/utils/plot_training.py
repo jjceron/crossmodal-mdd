@@ -8,9 +8,11 @@ Usage:
   python src/utils/plot_training.py --type classical_dl --modality audio --model deepconvnet --all --metric roc
   python src/utils/plot_training.py --type classical_ml --model xgboost --all --metric bacc
   python src/utils/plot_training.py --type ocampnet --model cross_attn --all --cm --save_png
+  python src/utils/plot_training.py --type crossmodal_nested --tag v101_mddk64 --seed 42 --subtype fusion --fold 1 --metric bacc
 """
 import os
 import sys
+import glob as globmod
 import json
 import argparse
 import numpy as np
@@ -92,6 +94,14 @@ def _plot_loss_metric(fig, axes, history, fold_num, metric_label, show_legend=Fa
         ax_l.legend(fontsize=7, loc='upper right')
         if metric_label != 'roc':
             ax_r.legend(fontsize=7, loc='lower right')
+
+
+def _find_fold(folds_data, fold_num):
+    """Find fold by number, with fallback to first entry for crossmodal_nested."""
+    fe = next((f for f in folds_data if f.get('fold') == fold_num), None)
+    if fe is None and len(folds_data) == 1:
+        fe = folds_data[0]
+    return fe
 
 
 def _plot_cm_pair(fig, axes, fold_entry, fold_num, show_title=True):
@@ -199,6 +209,8 @@ def _resolve_model(results_root, bench_type, model_arg):
 
 def _detect_type_and_load(args):
     """Detect structure (nested vs classical) and load data. Returns (folds_data, hist_key, out_dir)."""
+    if args.type == 'crossmodal_nested':
+        return _load_crossmodal_nested(args)
     nested_path = os.path.join(RESULTS_ROOT, args.type, args.model, 'results.json')
     if os.path.exists(nested_path):
         # Nested structure: <type>/<model>/results.json
@@ -230,16 +242,57 @@ def _detect_type_and_load(args):
     return folds_data, 'history', out_dir, results
 
 
+def _load_crossmodal_nested(args):
+    pattern = os.path.join(RESULTS_ROOT, 'crossmodal_nested',
+                           f'mhcmattn_sngkf_seed{args.seed}_*tag{args.tag}')
+    dirs = sorted(globmod.glob(pattern))
+    if not dirs:
+        print(f'ERROR: no experiment dir for tag={args.tag}, seed={args.seed}')
+        sys.exit(1)
+    results = json.load(open(os.path.join(dirs[-1], 'results.json')))
+
+    subtype = args.subtype or 'fusion'
+    hist_key = {'eeg': 'eeg_backbone_history',
+                'aud': 'aud_backbone_history',
+                'fusion': 'fusion_history'}[subtype]
+
+    folds_data = []
+    for fd in results['folds']:
+        ofi = fd['fold']
+        if args.fold is not None and ofi != args.fold:
+            continue
+        inner_folds = fd.get('inner_folds', [])
+        for inf in inner_folds:
+            ifi = inf['inner_fold']
+            if args.inner_fold is not None and ifi != args.inner_fold:
+                continue
+            hist = inf.get(hist_key, {})
+            folds_data.append({
+                'fold': f'{ofi}.{ifi}',
+                'history': hist,
+                'test_metrics': fd.get('test_metrics', {}),
+                'test_cm': fd.get('test_cm', []),
+                'test_roc': fd.get('test_roc', {}),
+                'test_bacc': fd.get('test_bacc'),
+                'test_auc': fd.get('test_auc'),
+            })
+
+    out_dir = os.path.join(FIGURES_ROOT, 'crossmodal_nested', args.tag)
+    os.makedirs(out_dir, exist_ok=True)
+    return folds_data, hist_key, out_dir, results
+
+
 def main():
     avail_types = _available_types()
     if not avail_types:
         print(f'ERROR: no type directories found under {RESULTS_ROOT}/')
         sys.exit(1)
 
+    choices = avail_types + ([] if 'crossmodal_nested' in avail_types else ['crossmodal_nested'])
     parser = argparse.ArgumentParser(description='Plot training diagnostics')
     parser.add_argument('--type', type=str, required=True,
-                        choices=avail_types,
-                        help=f'Experiment type. Available: {avail_types}')
+                        choices=choices,
+                        help=f'Experiment type. Available: {choices}')
     parser.add_argument('--model', type=str, default=None,
                         help='Model subfolder/key. Auto-detected if exactly one exists.')
     parser.add_argument('--channels', type=int, default=64,
@@ -248,6 +301,8 @@ def main():
                         help='Data modality (eeg=64ch, audio=64mel)')
     parser.add_argument('--fold', type=int, default=None,
                         help='Fold number (1-based)')
+    parser.add_argument('--inner-fold', dest='inner_fold', type=int, default=1,
+                        help='Inner fold number (crossmodal_nested only)')
     parser.add_argument('--all', action='store_true',
                         help='Show all folds in a grid')
     parser.add_argument('--metric', type=str, default=None,
@@ -262,8 +317,13 @@ def main():
     parser.add_argument('--subtype', type=str, default=None,
                         choices=['eeg', 'aud', 'fusion'],
                         help='History to plot: eeg, aud, fusion (nested structure only)')
+    parser.add_argument('--tag', type=str, default=None,
+                        help='Experiment tag (crossmodal_nested only)')
+    parser.add_argument('--seed', type=int, default=42,
+                        help='Experiment seed (crossmodal_nested only)')
     args = parser.parse_args()
-    args.model = _resolve_model(RESULTS_ROOT, args.type, args.model)
+    if args.type != 'crossmodal_nested':
+        args.model = _resolve_model(RESULTS_ROOT, args.type, args.model)
 
     folds_data, hist_key, out_dir, results = _detect_type_and_load(args)
 
@@ -286,7 +346,7 @@ def main():
                 _plot_cm_pair(fig, axes[i], fe, fe.get('fold', i + 1), show_title=k > 1)
             name = 'all_folds_cm'
         else:
-            fe = next((f for f in folds_data if f.get('fold') == args.fold), None)
+            fe = _find_fold(folds_data, args.fold)
             if fe is None:
                 print(f'ERROR: fold {args.fold} not found')
                 sys.exit(1)
@@ -348,7 +408,7 @@ def main():
                 _plot_roc_pair(fig, axes[i], fe, fe.get('fold', i + 1), show_legend=i == 0)
             name = 'all_folds_roc'
         else:
-            fe = next((f for f in folds_data if f.get('fold') == args.fold), None)
+            fe = _find_fold(folds_data, args.fold)
             if fe is None:
                 print(f'ERROR: fold {args.fold} not found')
                 sys.exit(1)
@@ -384,7 +444,7 @@ def main():
                                   fe.get('fold', i + 1), args.metric, show_legend=i == 0)
             name = f'all_folds_{args.metric}'
         else:
-            fe = next((f for f in folds_data if f.get('fold') == args.fold), None)
+            fe = _find_fold(folds_data, args.fold)
             if fe is None:
                 print(f'ERROR: fold {args.fold} not found')
                 sys.exit(1)
@@ -424,7 +484,7 @@ def main():
             _plot_loss_metric(fig, axes[i], hist, fe.get('fold', i + 1), 'bacc', show_legend=i == 0)
         name = 'all_folds_bacc'
     else:
-        fe = next((f for f in folds_data if f.get('fold') == args.fold), None)
+        fe = _find_fold(folds_data, args.fold)
         if fe is None:
             print(f'ERROR: fold {args.fold} not found')
             sys.exit(1)

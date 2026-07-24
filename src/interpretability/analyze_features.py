@@ -40,19 +40,24 @@ def main():
         eeg_data, eeg_labels, eeg_cods, aud_data, aud_labels, aud_cods, mapping)
     print(f'  Paired subjects: {len(pairs)}')
 
-    # Load checkpoint
-    print(f'Loading checkpoint seed={args.seed} fold={args.fold}...')
-    ckpt = load_checkpoint(args.tag, args.seed, args.fold)
-    eeg_model, aud_model, fusion_model = build_models(ckpt)
+    # Load ensemble checkpoints
+    print(f'Loading ensemble seed={args.seed} fold={args.fold}...')
+    inner_ckpts = load_inner_checkpoints(args.tag, args.seed, args.fold)
+    eeg_models, aud_models, fusion_models = build_ensemble_models(inner_ckpts)
 
-    # Extract features for all paired subjects
-    print('Extracting features...')
-    Z_e, Z_a, masks = extract_all_features(eeg_model, aud_model, pairs, eeg_subjs, aud_subjs)
+    # Extract features for all paired subjects (average across ensemble)
+    print('Extracting features (ensemble of %d)...' % len(inner_ckpts))
+    all_feats_eeg, all_feats_aud = [], []
+    for em, am in zip(eeg_models, aud_models):
+        Z_e, Z_a, masks = extract_all_features(em, am, pairs, eeg_subjs, aud_subjs)
+        masks_3d = masks[..., np.newaxis]
+        feats_eeg = (Z_e * masks_3d).sum(axis=1) / masks.sum(axis=1, keepdims=True).clip(min=1)
+        feats_aud = (Z_a * masks_3d).sum(axis=1) / masks.sum(axis=1, keepdims=True).clip(min=1)
+        all_feats_eeg.append(feats_eeg)
+        all_feats_aud.append(feats_aud)
 
-    # Per-subject: masked mean pooling
-    masks_3d = masks[..., np.newaxis]
-    feats_eeg = (Z_e * masks_3d).sum(axis=1) / masks.sum(axis=1, keepdims=True).clip(min=1)
-    feats_aud = (Z_a * masks_3d).sum(axis=1) / masks.sum(axis=1, keepdims=True).clip(min=1)
+    feats_eeg = np.mean(all_feats_eeg, axis=0)
+    feats_aud = np.mean(all_feats_aud, axis=0)
     feats_cat = np.concatenate([feats_eeg, feats_aud], axis=1)
 
     labels = np.array([p[2] for p in pairs])
