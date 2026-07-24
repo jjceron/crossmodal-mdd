@@ -127,7 +127,7 @@ class SelfAttentionBlock(nn.Module):
 class CrossModalAttention(nn.Module):
     """Cross-modal fusion with optional self-attention over window sequence."""
 
-    def __init__(self, eeg_dim, aud_dim, hidden=64, n_heads=2,
+    def __init__(self, eeg_dim, aud_dim, hidden=32, n_heads=2,
                  bottleneck_dim=None, n_self_attn_layers=0,
                  self_attn_heads=4, self_attn_dropout=0.1,
                  fusion='cross_attn', pooling='mean', dropout=0.5,
@@ -190,13 +190,8 @@ class CrossModalAttention(nn.Module):
             self.window_attn = nn.Parameter(torch.zeros(1, max_windows, 1))
             nn.init.xavier_uniform_(self.window_attn)
 
-        # Classifier head
-        self.head = nn.Sequential(
-            nn.Linear(hidden, hidden),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden, 1),
-        )
+        # Classifier head (linear only, no extra nonlinearity)
+        self.head = nn.Linear(hidden, 1)
 
     def _encode(self, z_eeg, z_audio, mask=None):
         """Shared encoding: adapter → bottleneck → proj → fusion → self-attn.

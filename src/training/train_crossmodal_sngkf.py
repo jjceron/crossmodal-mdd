@@ -520,7 +520,7 @@ def main():
     parser.add_argument('--n-self-attn-layers', type=int, default=0)
     parser.add_argument('--self-attn-heads', type=int, default=2)
     parser.add_argument('--self-attn-dropout', type=float, default=0.1)
-    parser.add_argument('--hidden', type=int, default=64)
+    parser.add_argument('--hidden', type=int, default=32)
     parser.add_argument('--n-heads', type=int, default=2)
     parser.add_argument('--pooling', choices=['mean', 'cls', 'attn'], default='mean')
     parser.add_argument('--dropout', type=float, default=0.6)
@@ -703,6 +703,7 @@ def run_experiment(seed, args, cv_seed=None):
             inner_best_vbs = []  # list of val_bacc per inner fold
             inner_best_eps = []  # list of best_epoch per inner fold
             inner_folds_info = []  # list of dicts with subject IDs per inner fold
+            inner_model_states = []  # model state dicts for ensemble
 
             for inner_fi, (fuse_tr_i, fuse_vl_i) in enumerate(
                     inner_splitter.split(np.zeros(len(tr_paired)), y_tr,
@@ -845,6 +846,16 @@ def run_experiment(seed, args, cv_seed=None):
                     'fusion_history': fusion_history,
                 })
 
+                # Save model states for ensemble evaluation
+                inner_model_states.append({
+                    'eeg_backbone_state': {k: v.cpu() for k, v in eeg_model.state_dict().items()},
+                    'aud_backbone_state': {k: v.cpu() for k, v in aud_model.state_dict().items()},
+                    'fusion_state_dict': {k: v.cpu() for k, v in fusion_model.state_dict().items()},
+                    'eeg_dim': eeg_dim,
+                    'aud_dim': aud_dim,
+                    'n_eeg_ch': n_bb_ch,
+                })
+
                 # Cleanup
                 del eeg_model, aud_model, fusion_model
                 if torch.cuda.is_available():
@@ -857,181 +868,116 @@ def run_experiment(seed, args, cv_seed=None):
             print(f'\n  *** Inner CV avg val_bacc={avg_inner_val:.3f}  avg_best_ep={avg_best_ep}  '
                   f'final_fusion_epochs={final_fusion_epochs} (cosine annealing) ***')
 
-            # ── Now train FINAL model on ALL tr_paired (no more validation needed) ──
-            print('\n  --- Training FINAL backbones on ALL paired subjects ---')
+            # ── Ensemble evaluation with inner models (no retrain, no leakage) ──
+            print('\n  --- Ensemble evaluation on test set ---')
 
-            # Train EEG backbone on ALL tr_paired + unpaired (proper val split)
-            inner_seed = cv_seed + fi
-            n_bb = len(eeg_bb_labels)
-            n_bb_ch = eeg_bb_data[0].shape[1]
-            sss = StratifiedShuffleSplit(n_splits=1, test_size=min(4, max(1, n_bb // 6)),
-                                         random_state=inner_seed + 999)
-            bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), eeg_bb_labels))
-            tr_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
-                                  bb_tr_i.tolist(),
-                                  max_windows=args.max_windows, augmenter=bb_eeg_aug, seed=inner_seed)
-            vl_ds = WindowDataset(eeg_bb_data, eeg_bb_labels, eeg_bb_cods,
-                                  bb_vl_i.tolist(),
-                                  max_windows=args.max_windows, seed=inner_seed)
-            tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
-            vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
-            eeg_model = DeepConvNetWrapper(n_bb_ch, N_EEG_SAMPLES).to(device)
-            eeg_best_st, eeg_best_vb, eeg_best_ep, eeg_history = train_backbone(eeg_model, tr_ldr, vl_ldr, args)
-            eeg_model.load_state_dict(eeg_best_st)
-            eeg_model.eval()
-            del tr_ds, vl_ds, tr_ldr, vl_ldr
-            print(f'    EEG backbone final: val_bacc={eeg_best_vb:.3f} best_ep={eeg_best_ep}')
+            n_inner = len(inner_model_states)
+            ensemble_logits = np.zeros(len(te_paired), dtype=np.float32)
+            # For attention averaging across ensemble
+            attn_per_model = []
 
-            # Train audio backbone on ALL tr_paired + unpaired (proper val split)
-            n_bb = len(aud_bb_labels)
-            sss = StratifiedShuffleSplit(n_splits=1, test_size=min(4, max(1, n_bb // 6)),
-                                         random_state=inner_seed + 888)
-            bb_tr_i, bb_vl_i = next(sss.split(np.zeros(n_bb), aud_bb_labels))
-            tr_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
-                                  bb_tr_i.tolist(),
-                                  max_windows=args.max_windows, augmenter=bb_aud_aug, seed=inner_seed)
-            vl_ds = WindowDataset(aud_bb_data, aud_bb_labels, aud_bb_cods,
-                                  bb_vl_i.tolist(),
-                                  max_windows=args.max_windows, seed=inner_seed)
-            tr_ldr = DataLoader(tr_ds, batch_size=32, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
-            vl_ldr = DataLoader(vl_ds, batch_size=32, shuffle=False, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
-            aud_model = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
-            aud_best_st, aud_best_vb, aud_best_ep, aud_history = train_backbone(aud_model, tr_ldr, vl_ldr, args)
-            aud_model.load_state_dict(aud_best_st)
-            aud_model.eval()
-            del tr_ds, vl_ds, tr_ldr, vl_ldr
-            print(f'    Audio backbone final: val_bacc={aud_best_vb:.3f} best_ep={aud_best_ep}')
+            for inner_fi, m_states in enumerate(inner_model_states):
+                print(f'\n    Inner model {inner_fi + 1}/{n_inner} — loading...')
 
-            # Extract features from ALL tr_paired (final)
-            eeg_aug = None
-            aud_aug = None
-            Z_e_tr, Z_a_tr, mask_tr = extract_all_features(
-                eeg_model, aud_model, tr_paired, eeg_dict, aud_dict,
-                args.max_windows)
+                # Load EEG backbone
+                eeg_m = DeepConvNetWrapper(m_states['n_eeg_ch'], N_EEG_SAMPLES).to(device)
+                eeg_m.load_state_dict(m_states['eeg_backbone_state'])
+                eeg_m.eval()
 
-            # Extract test features
-            Z_e_te, Z_a_te, mask_te = extract_all_features(
-                eeg_model, aud_model, te_paired, eeg_dict, aud_dict,
-                args.max_windows)
+                # Load audio backbone
+                aud_m = ShallowConvNetWrapper(N_MELS, N_AUDIO_SAMPLES).to(device)
+                aud_m.load_state_dict(m_states['aud_backbone_state'])
+                aud_m.eval()
 
-            y_tr = np.array([p[2] for p in tr_paired], dtype=np.float32)
-            y_te = np.array([p[2] for p in te_paired], dtype=np.float32)
+                # Extract test features
+                Z_e_te, Z_a_te, mask_te = extract_all_features(
+                    eeg_m, aud_m, te_paired, eeg_dict, aud_dict, args.max_windows)
 
-            eeg_dim = Z_e_tr.shape[2]
-            aud_dim = Z_a_tr.shape[2]
-            print(f'\n    EEG feat dim={eeg_dim}  Audio feat dim={aud_dim}')
-            print(f'    Train subjects={len(tr_paired)}  Test subjects={len(te_paired)}')
+                # Load fusion model
+                fus_m = CrossModalAttention(
+                    eeg_dim=m_states['eeg_dim'], aud_dim=m_states['aud_dim'],
+                    hidden=args.hidden, n_heads=args.n_heads,
+                    bottleneck_dim=args.bottleneck_dim,
+                    n_self_attn_layers=args.n_self_attn_layers,
+                    self_attn_heads=args.self_attn_heads,
+                    self_attn_dropout=args.self_attn_dropout,
+                    fusion=args.fusion, pooling=args.pooling, dropout=args.dropout,
+                    adapter_dim=args.adapter_dim, window_aux=args.window_aux,
+                    feat_dropout=args.feat_dropout, max_windows=args.max_windows,
+                ).to(device)
+                fus_m.load_state_dict(m_states['fusion_state_dict'])
+                fus_m.eval()
 
-            # ── Train final fusion head ──
-            # Train on ALL tr_paired with all epochs (no early stopping from contaminated val)
-            # Use fusion_epochs as max; no early stopping needed since we train on all data
-            print('\n  --- Training final fusion head on ALL paired ---')
-            fusion_model = CrossModalAttention(
-                eeg_dim=eeg_dim, aud_dim=aud_dim,
-                hidden=args.hidden, n_heads=args.n_heads,
-                bottleneck_dim=args.bottleneck_dim,
-                n_self_attn_layers=args.n_self_attn_layers,
-                self_attn_heads=args.self_attn_heads,
-                self_attn_dropout=args.self_attn_dropout,
-                fusion=args.fusion, pooling=args.pooling, dropout=args.dropout,
-                adapter_dim=args.adapter_dim, window_aux=args.window_aux,
-                feat_dropout=args.feat_dropout, max_windows=args.max_windows,
-            ).to(device)
+                # Score test subjects (collect logits + attention)
+                logits_inner = []
+                attn_inner = []
+                for si in range(len(te_paired)):
+                    ze = torch.FloatTensor(Z_e_te[si:si+1]).to(device)
+                    za = torch.FloatTensor(Z_a_te[si:si+1]).to(device)
+                    m = torch.FloatTensor(mask_te[si:si+1]).to(device)
+                    with torch.no_grad():
+                        logit = fus_m(ze, za, mask=m)
+                    logits_inner.append(logit.item())
+                    if hasattr(fus_m, '_attn_weights') and fus_m._attn_weights is not None:
+                        aw0 = fus_m._attn_weights[0]
+                        aw1 = fus_m._attn_weights[1]
+                        attn_inner.append({
+                            'eeg2audio_mean': float(aw0.mean().item()),
+                            'eeg2audio_std': float(aw0.std().item()),
+                            'eeg2audio_max': float(aw0.max().item()),
+                            'eeg2audio_min': float(aw0.min().item()),
+                            'audio2eeg_mean': float(aw1.mean().item()),
+                            'audio2eeg_std': float(aw1.std().item()),
+                            'audio2eeg_max': float(aw1.max().item()),
+                            'audio2eeg_min': float(aw1.min().item()),
+                        })
 
-            # Train on ALL training data (no validation split)
-            ds_all = torch.utils.data.TensorDataset(
-                torch.FloatTensor(Z_e_tr), torch.FloatTensor(Z_a_tr),
-                torch.FloatTensor(mask_tr), torch.FloatTensor(y_tr))
-            ld_all = DataLoader(ds_all, batch_size=args.bs, shuffle=True, num_workers=NUM_WORKERS, pin_memory=NUM_WORKERS > 0)
+                logits_inner = np.array(logits_inner)
+                ensemble_logits += logits_inner  # sum raw logits
+                attn_per_model.append(attn_inner)
+                print(f'    Inner model {inner_fi + 1} done')
 
-            opt = torch.optim.AdamW(fusion_model.parameters(), lr=args.lr_fusion,
-                                    weight_decay=args.wd_fusion, foreach=False)
-            n_mdd = y_tr.sum()
-            n_hc = len(y_tr) - n_mdd
-            pos_weight = torch.tensor([n_hc / max(n_mdd, 1)]).to(device)
-            crit = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+                # Cleanup
+                del eeg_m, aud_m, fus_m, Z_e_te, Z_a_te, mask_te
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
-            scheduler = CosineAnnealingLR(opt, T_max=final_fusion_epochs)
-            fusion_hist = {'train_loss': [], 'train_acc': [], 'train_bacc': [], 'lr': []}
-            for ep in range(1, final_fusion_epochs + 1):
-                fusion_model.train()
-                tr_loss, tr_n = 0.0, 0
-                tr_logits, tr_labels = [], []
-                for ze, za, m, yb in ld_all:
-                    ze, za, m, yb = ze.to(device), za.to(device), m.to(device), yb.to(device)
-                    opt.zero_grad()
-                    tr_labels.append(yb)
-                    if args.mixup_alpha > 0:
-                        ze, za, yb, _ = mixup_features(ze, za, yb, args.mixup_alpha)
-                    logits = fusion_model(ze, za, mask=m)
-                    y_smooth = yb * 0.95 + 0.025
-                    loss = crit(logits, y_smooth)
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(fusion_model.parameters(), 1.0)
-                    opt.step()
-                    tr_loss += loss.item() * yb.size(0)
-                    tr_n += yb.size(0)
-                    tr_logits.append(logits.detach())
-                scheduler.step()
-                tr_loss /= tr_n
-                tr_pred = (torch.sigmoid(torch.cat(tr_logits)).cpu().numpy() >= 0.5).astype(int)
-                tr_true = torch.cat(tr_labels).cpu().numpy()
-                tr_bacc = balanced_accuracy_score(tr_true, tr_pred)
-                tr_acc = (tr_pred == tr_true).mean()
-                current_lr = scheduler.get_last_lr()[0]
-                fusion_hist['train_loss'].append(float(tr_loss))
-                fusion_hist['train_acc'].append(float(tr_acc))
-                fusion_hist['train_bacc'].append(float(tr_bacc))
-                fusion_hist['lr'].append(float(current_lr))
-                if ep == 1 or ep % 10 == 0:
-                    print(f'    Epoch {ep}: train_loss={tr_loss:.4f}  train_bacc={tr_bacc:.3f}  lr={current_lr:.2e}')
+            # Average ensemble logits → apply sigmoid
+            avg_logits = ensemble_logits / n_inner
+            ensemble_probs = 1.0 / (1.0 + np.exp(-avg_logits))
+            y_pred = (ensemble_probs >= 0.5).astype(int)
+            y_true = np.array([p[2] for p in te_paired], dtype=np.int32)
 
-            # ── Evaluate on test subjects ──
-            print('\n  --- Evaluating ---')
-            y_true_list, y_pred_list, y_prob_list, test_attn = [], [], [], []
-            for si in range(len(te_paired)):
-                yt, yp, ypr = _eval_fn(
-                    fusion_model,
-                    Z_e_te[si:si+1], Z_a_te[si:si+1],
-                    mask_te[si:si+1], y_te[si:si+1])
-                y_true_list.append(yt[0])
-                y_pred_list.append(yp[0])
-                y_prob_list.append(ypr[0])
-                if hasattr(fusion_model, '_attn_weights') and fusion_model._attn_weights is not None:
-                    aw0 = fusion_model._attn_weights[0]
-                    aw1 = fusion_model._attn_weights[1]
-                    test_attn.append({
-                        'subject': te_paired[si][0],
-                        'eeg2audio_mean': float(aw0.mean().item()),
-                        'eeg2audio_std': float(aw0.std().item()),
-                        'eeg2audio_max': float(aw0.max().item()),
-                        'eeg2audio_min': float(aw0.min().item()),
-                        'audio2eeg_mean': float(aw1.mean().item()),
-                        'audio2eeg_std': float(aw1.std().item()),
-                        'audio2eeg_max': float(aw1.max().item()),
-                        'audio2eeg_min': float(aw1.min().item()),
-                    })
+            # Average attention across ensemble models
+            test_attn = []
+            if len(attn_per_model) == n_inner and len(attn_per_model[0]) == len(te_paired):
+                for si in range(len(te_paired)):
+                    avg_attn = {}
+                    for key in ['eeg2audio_mean', 'eeg2audio_std', 'eeg2audio_max', 'eeg2audio_min',
+                                'audio2eeg_mean', 'audio2eeg_std', 'audio2eeg_max', 'audio2eeg_min']:
+                        vals = [attn_per_model[m][si][key] for m in range(n_inner)]
+                        avg_attn[key] = float(np.mean(vals))
+                    avg_attn['subject'] = te_paired[si][0]
+                    test_attn.append(avg_attn)
 
-            y_true_s = np.array(y_true_list)
-            y_pred_s = np.array(y_pred_list)
-            y_prob_s = np.array(y_prob_list)
-
-            cm = confusion_matrix(y_true_s, y_pred_s).tolist()
-            roc_auc = float(roc_auc_score(y_true_s, y_prob_s))
-            bacc = balanced_accuracy_score(y_true_s, y_pred_s)
+            # Metrics
+            roc_auc = float(roc_auc_score(y_true, ensemble_probs))
+            bacc = balanced_accuracy_score(y_true, y_pred)
+            cm = confusion_matrix(y_true, y_pred).tolist()
             logger = ClassificationLogger()
-            fm = logger.log_fold_test(y_true_s, y_pred_s)
+            fm = logger.log_fold_test(y_true, y_pred)
+
+            print(f'\n  >>> Ensemble test: BACC={bacc:.4f}  AUC={roc_auc:.4f}  '
+                  f'Sens={fm["sens"]:.3f}  Spec={fm["spec"]:.3f}  F1={fm["f1"]:.3f}')
 
             fold_results.append({
                 'fold': fi + 1,
                 'inner_cv_val_bacc': avg_inner_val,
                 'inner_cv_best_epoch_mean': avg_best_ep,
                 'inner_cv_best_epoch_std': float(np.std(inner_best_eps)),
-                'final_fusion_epochs': final_fusion_epochs,
+                'final_fusion_epochs': None,
                 'inner_folds_val_baccs': [float(v) for v in inner_best_vbs],
                 'inner_folds_best_epochs': [int(e) for e in inner_best_eps],
-                'eeg_backbone_val_bacc': float(eeg_best_vb),
-                'aud_backbone_val_bacc': float(aud_best_vb),
                 'test_metrics': fm,
                 'test_bacc': float(bacc),
                 'test_acc': float(fm['acc']),
@@ -1040,16 +986,13 @@ def run_experiment(seed, args, cv_seed=None):
                 'test_spec': float(fm['spec']),
                 'test_auc': roc_auc,
                 'test_cm': cm,
-                'test_roc': {'y_true': y_true_s.tolist(), 'y_prob': y_prob_s.tolist()},
+                'test_roc': {'y_true': y_true.tolist(), 'y_prob': ensemble_probs.tolist()},
+                'ensemble_n_folds': n_inner,
                 'n_backbone_eeg': len(eeg_bb_cods),
                 'n_backbone_aud': len(aud_bb_cods),
                 'n_train_paired': len(tr_paired),
                 'n_test': len(te_paired),
                 'test_subjects': [p[0] for p in te_paired],
-                'eeg_history': eeg_history,
-                'aud_history': aud_history,
-                'fusion_history': fusion_hist,
-                # Subject tracking
                 'train_subjects': [p[0] for p in tr_paired],
                 'eeg_backbone_subjects': eeg_bb_cods,
                 'aud_backbone_subjects': aud_bb_cods,
@@ -1060,22 +1003,24 @@ def run_experiment(seed, args, cv_seed=None):
                   f'test_bacc={bacc:.3f}  test_auc={roc_auc:.3f}  '
                   f'sens={fm["sens"]:.3f}  spec={fm["spec"]:.3f}  f1={fm["f1"]:.3f}')
 
-            # Save checkpoint
+            # Save checkpoint per inner fold
             if args.save_model:
                 ckpt_dir = os.path.join(out_dir, 'checkpoints')
                 os.makedirs(ckpt_dir, exist_ok=True)
-                torch.save({
-                    'fold': fi + 1,
-                    'fusion_state_dict': fusion_model.state_dict(),
-                    'eeg_backbone_state': eeg_best_st,
-                    'aud_backbone_state': aud_best_st,
-                    'args': vars(args),
-                    'test_bacc': float(bacc),
-                    'test_auc': roc_auc,
-                    'test_attention': test_attn,
-                    'inner_folds': inner_folds_info,
-                }, os.path.join(ckpt_dir, f'fold_{fi+1}.pt'))
-                print(f'    Saved: fold_{fi+1}.pt')
+                for inner_fi, m_states in enumerate(inner_model_states):
+                    torch.save({
+                        'outer_fold': fi + 1,
+                        'inner_fold': inner_fi + 1,
+                        'eeg_backbone_state': m_states['eeg_backbone_state'],
+                        'aud_backbone_state': m_states['aud_backbone_state'],
+                        'fusion_state_dict': m_states['fusion_state_dict'],
+                        'args': vars(args),
+                        'inner_val_bacc': inner_folds_info[inner_fi]['inner_val_bacc'],
+                        'eeg_dim': m_states['eeg_dim'],
+                        'aud_dim': m_states['aud_dim'],
+                        'n_eeg_ch': m_states['n_eeg_ch'],
+                    }, os.path.join(ckpt_dir, f'fold{fi+1}_inner{inner_fi+1}.pt'))
+                print(f'    Saved {n_inner} inner checkpoints')
 
             # Partial save after each fold
             partial_baccs = [r['test_bacc'] for r in fold_results]
@@ -1145,7 +1090,6 @@ def run_experiment(seed, args, cv_seed=None):
             with open(partial_path, 'w') as f:
                 json.dump(partial_results, f, indent=2)
 
-            del eeg_model, aud_model, fusion_model
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
