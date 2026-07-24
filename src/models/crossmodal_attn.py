@@ -185,10 +185,9 @@ class CrossModalAttention(nn.Module):
             self.cls_token = nn.Parameter(torch.randn(1, 1, hidden))
             self.pool = AttentionPool(hidden)
 
-        # Learnable window attention for pooling='attn'
+        # Content-based attention pooling for pooling='attn'
         if pooling == 'attn':
-            self.window_attn = nn.Parameter(torch.zeros(1, max_windows, 1))
-            nn.init.xavier_uniform_(self.window_attn)
+            self.pool = AttentionPool(hidden)
 
         # Classifier head (linear only, no extra nonlinearity)
         self.head = nn.Linear(hidden, 1)
@@ -299,13 +298,9 @@ class CrossModalAttention(nn.Module):
             z_pooled = torch.cat([cls, z], dim=1)
             z_pooled = self.pool(z_pooled)
         elif self.pooling == 'attn':
-            attn_w = torch.softmax(self.window_attn, dim=1)  # [1, K_max, 1]
-            attn_w = attn_w[:, :z.shape[1]]  # trim to actual K
             if mask is not None:
-                attn_w = attn_w * mask.unsqueeze(-1)
-                attn_w = attn_w / attn_w.sum(dim=1, keepdim=True).clamp(min=1e-8)
-            self._window_pool_weights = attn_w.detach().squeeze(-1)
-            z_pooled = (z * attn_w).sum(dim=1)
+                z = z * mask.unsqueeze(-1)
+            z_pooled = self.pool(z)
 
         # Classifier
         logits = self.head(z_pooled).squeeze(-1)

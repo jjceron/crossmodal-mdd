@@ -656,6 +656,7 @@ def run_experiment(seed, args, cv_seed=None):
     print(f'  Paired: {len(pairs)} ({n_mdd_paired} MDD, {n_hc_paired} HC)')
     print('Config:')
     print(f'  fusion={args.fusion}  hidden={args.hidden}  n_heads={args.n_heads}  dropout={args.dropout}')
+    print(f'  pool={args.pooling}  bottleneck={args.bottleneck_dim}  entropy_lambda={args.entropy_lambda}')
     print(f'  window_aux={args.window_aux}  n_self_attn={args.n_self_attn_layers}({args.self_attn_heads}h)  feat_dropout={args.feat_dropout}  max_windows={args.max_windows}')
     print('Backbones:')
     print(f'  EEG DeepConvNet:      {n_eeg_p:>8,} params')
@@ -873,8 +874,10 @@ def run_experiment(seed, args, cv_seed=None):
             print('\n  --- Ensemble evaluation on test set ---')
 
             n_inner = len(inner_model_states)
+            # Weighted ensemble by inner val_bacc
+            inner_weights = np.array(inner_best_vbs, dtype=np.float32)
+            inner_weights = inner_weights / inner_weights.sum()
             ensemble_logits = np.zeros(len(te_paired), dtype=np.float32)
-            # For attention averaging across ensemble
             attn_per_model = []
 
             for inner_fi, m_states in enumerate(inner_model_states):
@@ -934,7 +937,7 @@ def run_experiment(seed, args, cv_seed=None):
                         })
 
                 logits_inner = np.array(logits_inner)
-                ensemble_logits += logits_inner  # sum raw logits
+                ensemble_logits += inner_weights[inner_fi] * logits_inner
                 attn_per_model.append(attn_inner)
                 print(f'    Inner model {inner_fi + 1} done')
 
@@ -943,9 +946,9 @@ def run_experiment(seed, args, cv_seed=None):
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
-            # Average ensemble logits → apply sigmoid
-            avg_logits = ensemble_logits / n_inner
-            ensemble_probs = 1.0 / (1.0 + np.exp(-avg_logits))
+            print(f'    Ensemble weights by val_bacc: {np.round(inner_weights, 3).tolist()}')
+            # Weighted ensemble logits → apply sigmoid
+            ensemble_probs = 1.0 / (1.0 + np.exp(-ensemble_logits))
             y_pred = (ensemble_probs >= 0.5).astype(int)
             y_true = np.array([p[2] for p in te_paired], dtype=np.int32)
 
